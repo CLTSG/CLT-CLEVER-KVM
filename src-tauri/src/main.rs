@@ -5,6 +5,7 @@ mod capture;
 mod input;
 mod server;
 mod utils;
+mod logging;
 
 use crate::server::WebSocketServer;
 use local_ip_address::local_ip;
@@ -12,6 +13,10 @@ use std::sync::{Arc, Mutex};
 use tauri::{Manager};
 use tokio::runtime::Runtime;
 use serde::Deserialize;
+use log::{info, warn, error, debug};
+
+const APP_NAME: &str = "clever-kvm";
+const LOG_ROTATE_SIZE_MB: u64 = 10;
 
 // Server options
 #[derive(Debug, Deserialize, Default)]
@@ -53,19 +58,29 @@ fn start_server(app_handle: tauri::AppHandle, port: Option<u16>, options: Option
     let mut state = state.lock().unwrap();
 
     if state.running {
+        warn!("Attempted to start server when already running");
         return Err("Server is already running".to_string());
     }
     
     // Store options
     if let Some(opts) = options {
+        debug!("Server options: delta_encoding={:?}, adaptive_quality={:?}, encryption={:?}, webrtc={:?}",
+               opts.delta_encoding, opts.adaptive_quality, opts.encryption, opts.webrtc);
         state.options = opts;
     }
 
+    info!("Starting KVM server on port {}", port);
     let app_handle_clone = app_handle.clone();
     let server = state.runtime.block_on(async move {
         match WebSocketServer::new(port, app_handle_clone).await {
-            Ok(server) => Ok(server),
-            Err(e) => Err(format!("Failed to start server: {}", e)),
+            Ok(server) => {
+                info!("Server started successfully");
+                Ok(server)
+            },
+            Err(e) => {
+                error!("Failed to start server: {}", e);
+                Err(format!("Failed to start server: {}", e))
+            },
         }
     })?;
 
@@ -75,11 +90,18 @@ fn start_server(app_handle: tauri::AppHandle, port: Option<u16>, options: Option
 
     // Get local IP address
     let ip = match local_ip() {
-        Ok(ip) => ip.to_string(),
-        Err(_) => "127.0.0.1".to_string(),
+        Ok(ip) => {
+            debug!("Local IP address: {}", ip);
+            ip.to_string()
+        },
+        Err(e) => {
+            warn!("Failed to determine local IP address: {}", e);
+            "127.0.0.1".to_string()
+        },
     };
 
     let url = format!("http://{}:{}/kvm", ip, port);
+    info!("Server URL: {}", url);
     Ok(url)
 }
 
@@ -89,13 +111,16 @@ fn stop_server(app_handle: tauri::AppHandle) -> Result<(), String> {
     let mut state = state.lock().unwrap();
 
     if !state.running {
+        warn!("Attempted to stop server when not running");
         return Err("Server is not running".to_string());
     }
 
+    info!("Stopping KVM server");
     if let Some(server) = state.server_handle.take() {
         state.runtime.block_on(async {
             server.shutdown().await;
         });
+        info!("Server stopped successfully");
     }
 
     state.running = false;
@@ -106,6 +131,7 @@ fn stop_server(app_handle: tauri::AppHandle) -> Result<(), String> {
 fn get_server_status(app_handle: tauri::AppHandle) -> bool {
     let state = app_handle.state::<Arc<Mutex<ServerState>>>();
     let state = state.lock().unwrap();
+    debug!("Server status requested: {}", state.running);
     state.running
 }
 
@@ -115,33 +141,67 @@ fn get_server_url(app_handle: tauri::AppHandle) -> Result<String, String> {
     let state = state.lock().unwrap();
 
     if !state.running {
+        warn!("URL requested but server is not running");
         return Err("Server is not running".to_string());
     }
 
     // Get local IP address
     let ip = match local_ip() {
         Ok(ip) => ip.to_string(),
-        Err(_) => "127.0.0.1".to_string(),
+        Err(e) => {
+            warn!("Failed to determine local IP address: {}", e);
+            "127.0.0.1".to_string()
+        },
     };
 
     let url = format!("http://{}:{}/kvm", ip, state.port);
+    debug!("Returning server URL: {}", url);
     Ok(url)
 }
 
+#[tauri::command]
+fn get_logs() -> Result<(String, String), String> {
+    if let Some((debug_path, error_path)) = logging::get_log_paths(APP_NAME) {
+        let debug_content = std::fs::read_to_string(debug_path)
+            .map_err(|e| format!("Failed to read debug log: {}", e))?;
+            
+        let error_content = std::fs::read_to_string(error_path)
+            .map_err(|e| format!("Failed to read error log: {}", e))?;
+            
+        Ok((debug_content, error_content))
+    } else {
+        Err("Could not determine log file paths".to_string())
+    }
+}
+
 fn main() {
-    env_logger::init();
+    // Initialize logging
+    if let Err(e) = logging::init(APP_NAME) {
+        eprintln!("Failed to initialize logging: {}", e);
+    }
+    
+    // Rotate logs if they're too big
+    if let Err(e) = logging::rotate_logs(APP_NAME, LOG_ROTATE_SIZE_MB) {
+        eprintln!("Failed to rotate logs: {}", e);
+    }
+    
+    info!("Clever KVM starting up");
+    debug!("Running in {} mode", if cfg!(debug_assertions) { "DEBUG" } else { "RELEASE" });
     
     tauri::Builder::default()
         .setup(|app| {
+            info!("Setting up Tauri application");
             // Initialize server state
             app.manage(Arc::new(Mutex::new(ServerState::new())));
+            debug!("Server state initialized");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             start_server,
             stop_server,
             get_server_status,
-            get_server_url
+            get_server_url,
+            get_logs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

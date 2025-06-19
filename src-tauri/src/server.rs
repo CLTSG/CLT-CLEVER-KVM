@@ -702,7 +702,7 @@ async fn handle_socket(socket: WebSocket) {
         let _ = screen_tx.blocking_send(Ok(bincode::serialize(&dimensions).unwrap_or_default()));
         
         // Default quality
-        let mut current_quality = DEFAULT_QUALITY;
+        let current_quality = DEFAULT_QUALITY;
         let use_delta = true;
         
         // Capture loop
