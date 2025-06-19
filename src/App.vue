@@ -9,10 +9,13 @@ const serverPort = ref(9921);
 const loading = ref(false);
 const errorMessage = ref("");
 const showAdvancedSettings = ref(false);
+const showLogs = ref(false);
 const deltaEncoding = ref(true);
 const adaptiveQuality = ref(true);
 const encryptionEnabled = ref(false);
 const webrtcEnabled = ref(false);
+const debugLog = ref("");
+const errorLog = ref("");
 
 // Check server status on mount
 onMounted(async () => {
@@ -111,6 +114,23 @@ function copyUrl() {
 
 function toggleAdvancedSettings() {
   showAdvancedSettings.value = !showAdvancedSettings.value;
+}
+
+function toggleLogs() {
+  showLogs.value = !showLogs.value;
+  if (showLogs.value) {
+    refreshLogs();
+  }
+}
+
+async function refreshLogs() {
+  try {
+    const [debug, error] = await invoke("get_logs");
+    debugLog.value = debug;
+    errorLog.value = error;
+  } catch (error) {
+    errorMessage.value = `Failed to load logs: ${error}`;
+  }
 }
 </script>
 
@@ -243,6 +263,29 @@ function toggleAdvancedSettings() {
         </ul>
       </div>
     </div>
+    
+    <div class="card">
+      <div class="log-toggle">
+        <button @click="toggleLogs" class="text-button">
+          {{ showLogs ? '⬆️ Hide Logs' : '⬇️ Show Logs' }}
+        </button>
+        <button v-if="showLogs" @click="refreshLogs" class="text-button refresh">
+          🔄 Refresh
+        </button>
+      </div>
+      
+      <div v-if="showLogs" class="logs-container">
+        <div class="log-section">
+          <h3>Error Log</h3>
+          <pre class="log-content">{{ errorLog || 'No errors logged' }}</pre>
+        </div>
+        
+        <div class="log-section">
+          <h3>Debug Log</h3>
+          <pre class="log-content">{{ debugLog || 'No debug logs available' }}</pre>
+        </div>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -357,8 +400,10 @@ input[type="number"] {
   width: 100px;
 }
 
-.advanced-toggle {
+.advanced-toggle, .log-toggle {
   margin: 1rem 0;
+  display: flex;
+  align-items: center;
 }
 
 .text-button {
@@ -369,6 +414,10 @@ input[type="number"] {
   font-size: 0.9rem;
   padding: 0;
   text-decoration: underline;
+}
+
+.text-button.refresh {
+  margin-left: 1rem;
 }
 
 .advanced-settings {
@@ -475,5 +524,25 @@ code {
 
 .features-section li {
   margin-bottom: 0.5rem;
+}
+
+.logs-container {
+  margin-top: 1rem;
+}
+
+.log-section {
+  margin-bottom: 1.5rem;
+}
+
+.log-content {
+  background-color: #f8f9fa;
+  padding: 1rem;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #eee;
 }
 </style>
