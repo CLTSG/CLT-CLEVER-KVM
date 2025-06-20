@@ -10,6 +10,7 @@ A remote desktop system (screen sharing, mouse and keyboard control) built with 
 - **Adaptive Quality**: Automatically adjust image quality based on network conditions
 - **Optional Encryption**: Secure the connection between client and server
 - **WebRTC Audio Support** (experimental): Stream audio from the host computer
+- **Multi-monitor Support**: Select which monitor to display and control
 
 ## Requirements
 
@@ -70,6 +71,9 @@ The following URL parameters can be used to customize the connection:
 - `audio=true` - Enable audio streaming
 - `remoteOnly=true` - Only show remote screen (no toolbar)
 - `encryption=true` - Enable encrypted connection
+- `codec=h264` - Use H.264 encoding for better quality and lower bandwidth (default)
+- `codec=jpeg` - Use JPEG encoding for better compatibility
+- `monitor=0` - Select which monitor to display (0 is primary, 1 is secondary, etc.)
 
 ```
 Example: `http://hostname:9921/kvm?stretch=true;mute=true`
