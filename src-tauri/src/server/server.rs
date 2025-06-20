@@ -16,7 +16,7 @@ use std::convert::Infallible;
 use axum::http::{StatusCode, Response};
 use axum::body::Body;
 
-use super::handlers::{ws_handler, kvm_client_handler};
+use super::handlers::{ws_handler, kvm_client_handler, static_file_handler};
 
 pub struct WebSocketServer {
     shutdown_tx: mpsc::Sender<()>,
@@ -40,6 +40,7 @@ impl WebSocketServer {
         let app = Router::new()
             .route("/ws", get(ws_handler))
             .route("/kvm", get(kvm_client_handler))
+            .route("/static/*path", get(static_file_handler))
             .fallback_service(
                 ServeDir::new("web-client")
                     .append_index_html_on_directories(true)

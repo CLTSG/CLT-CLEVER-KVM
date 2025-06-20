@@ -4,236 +4,173 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Clever KVM</title>
-    <style>
-        body, html { 
-            margin: 0; 
-            padding: 0; 
-            height: 100%; 
-            overflow: hidden; 
-            background-color: #000;
-            display: flex;
-            flex-direction: column;
-        }
-        #screen {
-            flex: 1;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            overflow: hidden;
-            position: relative;
-        }
-        #remote-screen {
-            {{display_mode}}
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: {{fit_mode}};
-        }
-        #video-screen {
-            {{display_mode}}
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: {{fit_mode}};
-        }
-        #canvas-layer {
-            position: absolute;
-            top: 0;
-            left: 0;
-            pointer-events: none;
-        }
-        #toolbar {
-            background-color: #333;
-            color: white;
-            padding: 5px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        #status {
-            padding: 0 10px;
-        }
-        #toolbar button {
-            background-color: #555;
-            color: white;
-            border: none;
-            padding: 5px 10px;
-            margin: 0 5px;
-            cursor: pointer;
-            border-radius: 3px;
-        }
-        #toolbar button:hover {
-            background-color: #777;
-        }
-        .hidden {
-            display: none !important;
-        }
-        #network-stats {
-            position: absolute;
-            bottom: 10px;
-            right: 10px;
-            background-color: rgba(0,0,0,0.7);
-            color: white;
-            padding: 5px;
-            font-size: 12px;
-            border-radius: 3px;
-            font-family: monospace;
-            z-index: 100;
-        }
-        #monitor-dropdown {
-            background-color: #555;
-            color: white;
-            border: none;
-            padding: 5px 10px;
-            margin: 0 5px;
-            border-radius: 3px;
-        }
-        #settings-panel {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background-color: #333;
-            color: white;
-            padding: 20px;
-            border-radius: 5px;
-            z-index: 200;
-            min-width: 300px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-        }
-        #settings-panel h3 {
-            margin-top: 0;
-        }
-        #settings-panel label {
-            display: block;
-            margin: 10px 0;
-        }
-        #settings-panel button {
-            background-color: #555;
-            color: white;
-            border: none;
-            padding: 8px 15px;
-            margin-top: 15px;
-            cursor: pointer;
-            border-radius: 3px;
-        }
-        #settings-panel button:hover {
-            background-color: #777;
-        }
-        .setting-row {
-            margin-bottom: 10px;
-        }
-        .quality-slider {
-            width: 100%;
-        }
-        
-        /* HUD Notifications */
-        #notification-area {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            max-width: 300px;
-            z-index: 1000;
-        }
-        .notification {
-            background-color: rgba(0,0,0,0.7);
-            color: white;
-            padding: 10px;
-            margin-bottom: 5px;
-            border-radius: 5px;
-            font-size: 14px;
-            opacity: 1;
-            transition: opacity 0.3s;
-        }
-        .notification.fadeout {
-            opacity: 0;
-        }
-        
-        /* Gesture indicators */
-        #gesture-indicator {
-            position: absolute;
-            border-radius: 50%;
-            background-color: rgba(255,255,255,0.2);
-            pointer-events: none;
-            z-index: 150;
-            transform: translate(-50%, -50%);
-            display: none;
-        }
-    </style>
+    <link rel="stylesheet" href="/static/kvm-client.css">
 </head>
 <body>
-    <div id="toolbar" class="{{toolbar_class}}">
-        <div id="status">Connecting...</div>
-        <div>
-            <select id="monitor-dropdown">
-                <option value="loading">Loading monitors...</option>
-            </select>
-            <select id="codec-dropdown">
-                <option value="h264">H.264</option>
-                <option value="h265">H.265/HEVC</option>
-                <option value="av1">AV1</option>
-                <option value="jpeg">JPEG</option>
-            </select>
-            <button id="fullscreen-btn">Fullscreen</button>
-            <button id="settings-btn">Settings</button>
-            <button id="disconnect-btn">Disconnect</button>
-        </div>
-    </div>
+    <!-- Main screen container -->
     <div id="screen">
         <!-- For JPEG streaming -->
-        <img id="remote-screen" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=">
+        <img id="remote-screen" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" alt="Remote Screen">
         
         <!-- For H.264/H.265/AV1 streaming -->
-        <video id="video-screen" class="hidden" autoplay playsinline></video>
+        <video id="video-screen" class="hidden" autoplay playsinline muted></video>
         
         <canvas id="canvas-layer"></canvas>
-        <div id="network-stats" class="hidden">
-            FPS: <span id="fps">0</span> | 
-            Latency: <span id="latency">0</span>ms | 
-            Quality: <span id="quality">0</span>%<br>
-            Codec: <span id="codec-info">{{codec}}</span> |
-            Monitor: <span id="monitor-info">{{monitor}}</span>
+        
+        <!-- OSD Overlay -->
+        <div class="osd-overlay">
+            <!-- Status Display (center) -->
+            <div class="status-display">
+                <h2>Connecting</h2>
+                <p>Establishing connection...</p>
+                <div class="loading-spinner"></div>
+            </div>
+            
+            <!-- Top OSD Bar -->
+            <div class="osd-top">
+                <div class="osd-title">Clever KVM</div>
+                <div class="osd-info">
+                    <span id="fps-display">FPS: <span id="fps">0</span></span>
+                    <span id="latency-display">Latency: <span id="latency">0</span>ms</span>
+                    <span id="quality-display">Quality: <span id="quality">85</span>%</span>
+                </div>
+            </div>
+            
+            <!-- Bottom OSD Controls -->
+            <div class="osd-bottom">
+                <div class="osd-controls">
+                    <select id="monitor-dropdown" class="osd-select">
+                        <option value="loading">Loading monitors...</option>
+                    </select>
+                    
+                    <select id="codec-dropdown" class="osd-select">
+                        <option value="h264">H.264</option>
+                        <option value="h265">H.265/HEVC</option>
+                        <option value="av1">AV1</option>
+                        <option value="jpeg">JPEG</option>
+                    </select>
+                    
+                    <button id="fullscreen-btn" class="osd-button">
+                        <span>⛶</span> Fullscreen
+                    </button>
+                    
+                    <button id="settings-btn" class="osd-button">
+                        <span>⚙</span> Settings
+                    </button>
+                    
+                    <button id="disconnect-btn" class="osd-button danger">
+                        <span>⏻</span> Disconnect
+                    </button>
+                </div>
+            </div>
         </div>
         
-        <div id="gesture-indicator"></div>
-        <div id="notification-area"></div>
+        <!-- Network Stats -->
+        <div class="network-stats">
+            <div class="stats-row">
+                <span class="stat-label">FPS:</span>
+                <span class="stat-value" id="fps">0</span>
+            </div>
+            <div class="stats-row">
+                <span class="stat-label">Latency:</span>
+                <span class="stat-value" id="latency">0</span><span class="stat-label">ms</span>
+            </div>
+            <div class="stats-row">
+                <span class="stat-label">Quality:</span>
+                <span class="stat-value" id="quality">85</span><span class="stat-label">%</span>
+            </div>
+            <div class="stats-row">
+                <span class="stat-label">Codec:</span>
+                <span class="stat-value" id="codec-info">{{codec}}</span>
+            </div>
+        </div>
+        
+        <!-- Gesture Indicator -->
+        <div class="gesture-indicator"></div>
+        
+        <!-- Notification Area -->
+        <div class="notification-area"></div>
     </div>
+    
+    <!-- Audio Element -->
     <audio id="remote-audio" autoplay {{mute_attr}}></audio>
     
-    <!-- Settings Panel -->
-    <div id="settings-panel" class="hidden">
-        <h3>Settings</h3>
-        <div class="setting-row">
-            <label>
-                <input type="checkbox" id="setting-stretch"> Stretch to fit window
-            </label>
+    <!-- Modern Settings Panel -->
+    <div class="settings-panel">
+        <div class="settings-header">
+            <h3>Settings</h3>
+            <button class="close-button">&times;</button>
         </div>
-        <div class="setting-row">
-            <label>
-                <input type="checkbox" id="setting-audio" {{audio_checked}}> Enable audio
-            </label>
+        
+        <div class="settings-content">
+            <div class="settings-section">
+                <div class="section-title">
+                    <span>🖥</span> Display
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">Stretch to fit window</label>
+                    <div class="setting-control">
+                        <div class="toggle-switch" data-setting="stretch">
+                            <input type="checkbox" id="setting-stretch" hidden {{stretch_checked}}>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">Show performance stats</label>
+                    <div class="setting-control">
+                        <div class="toggle-switch" data-setting="stats">
+                            <input type="checkbox" id="setting-stats" hidden>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <div class="section-title">
+                    <span>🔊</span> Audio
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">Enable audio</label>
+                    <div class="setting-control">
+                        <div class="toggle-switch" data-setting="audio">
+                            <input type="checkbox" id="setting-audio" hidden {{audio_checked}}>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">Mute audio</label>
+                    <div class="setting-control">
+                        <div class="toggle-switch" data-setting="mute">
+                            <input type="checkbox" id="setting-mute" hidden {{mute_checked}}>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <div class="section-title">
+                    <span>⚡</span> Performance
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">Quality</label>
+                    <div class="setting-control">
+                        <input type="range" class="range-slider" id="quality-slider" min="25" max="95" value="85">
+                        <span class="range-value" id="quality-value">85</span><span class="stat-label">%</span>
+                    </div>
+                </div>
+            </div>
         </div>
-        <div class="setting-row">
-            <label>
-                <input type="checkbox" id="setting-mute" {{mute_checked}}> Mute audio
-            </label>
-        </div>
-        <div class="setting-row">
-            <label>Quality: <span id="quality-value">85</span>%</label>
-            <input type="range" class="quality-slider" id="quality-slider" min="25" max="95" value="85">
-        </div>
-        <div class="setting-row">
-            <label>
-                <input type="checkbox" id="setting-stats"> Show performance stats
-            </label>
-        </div>
-        <div class="setting-row buttons">
-            <button id="settings-save">Save</button>
-            <button id="settings-cancel">Cancel</button>
+        
+        <div class="settings-actions">
+            <button id="settings-cancel" class="settings-button">Cancel</button>
+            <button id="settings-save" class="settings-button primary">Save</button>
         </div>
     </div>
 
+    <!-- Load configuration and initialize -->
     <script>
-        // KVM Client Configuration
-        const config = {
+        // Configuration from server template
+        window.KVM_CONFIG = {
             stretch: {{stretch}},
             mute: {{mute}},
             audio: {{audio}},
@@ -242,1136 +179,8 @@
             monitor: {{monitor}},
             codec: "{{codec}}"
         };
-
-        // Elements
-        const screen = document.getElementById('remote-screen');
-        const videoScreen = document.getElementById('video-screen');
-        const canvasLayer = document.getElementById('canvas-layer');
-        const ctx = canvasLayer.getContext('2d');
-        const status = document.getElementById('status');
-        const audioElement = document.getElementById('remote-audio');
-        const fullscreenBtn = document.getElementById('fullscreen-btn');
-        const disconnectBtn = document.getElementById('disconnect-btn');
-        const settingsBtn = document.getElementById('settings-btn');
-        const networkStats = document.getElementById('network-stats');
-        const fpsElement = document.getElementById('fps');
-        const latencyElement = document.getElementById('latency');
-        const qualityElement = document.getElementById('quality');
-        const monitorDropdown = document.getElementById('monitor-dropdown');
-        const codecDropdown = document.getElementById('codec-dropdown');
-        const codecInfo = document.getElementById('codec-info');
-        const monitorInfo = document.getElementById('monitor-info');
-        const gestureIndicator = document.getElementById('gesture-indicator');
-        const notificationArea = document.getElementById('notification-area');
-        
-        // Settings panel elements
-        const settingsPanel = document.getElementById('settings-panel');
-        const settingStretch = document.getElementById('setting-stretch');
-        const settingAudio = document.getElementById('setting-audio');
-        const settingMute = document.getElementById('setting-mute');
-        const settingStats = document.getElementById('setting-stats');
-        const qualitySlider = document.getElementById('quality-slider');
-        const qualityValue = document.getElementById('quality-value');
-        const settingsSave = document.getElementById('settings-save');
-        const settingsCancel = document.getElementById('settings-cancel');
-
-        // Connection
-        let ws;
-        let connected = false;
-        let lastFrame = 0;
-        let frameCount = 0;
-        let lastFpsUpdate = Date.now();
-        let screenWidth = 0;
-        let screenHeight = 0;
-        let tileWidth = 0;
-        let tileHeight = 0;
-        let tileSize = 0;
-        let latency = 0;
-        let lastPingTime = 0;
-        let pingInterval;
-        let qualityLevel = 85;
-        let availableMonitors = [];
-        let currentMonitor = config.monitor;
-        let currentCodec = config.codec;
-        let mediaSource;
-        let sourceBuffer;
-        let videoQueue = [];
-        let showStats = false;
-        
-        // Multi-touch and gesture support
-        let touchIdentifiers = new Map();
-        let gestureInProgress = false;
-        let initialTouchDistance = 0;
-        let initialTouchAngle = 0;
-        
-        // Tile cache for delta encoding
-        const tileImages = new Map();
-        let totalTiles = 0;
-
-        // WebRTC for audio
-        let peerConnection;
-        let audioStream;
-
-        // Initialize settings from URL params
-        settingStretch.checked = config.stretch;
-        settingAudio.checked = config.audio;
-        settingMute.checked = config.mute;
-        codecDropdown.value = config.codec;
-
-        // Connect to WebSocket server
-        function connect() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            // Include monitor and codec in the WebSocket URL
-            const wsUrl = `${protocol}//${window.location.host}/ws?monitor=${currentMonitor}&codec=${currentCodec}${config.audio ? '&audio=true' : ''}`;
-            
-            ws = new WebSocket(wsUrl);
-            
-            ws.onopen = () => {
-                connected = true;
-                status.textContent = 'Connected';
-                console.log('WebSocket connection established');
-                
-                // Start sending ping messages to measure latency
-                pingInterval = setInterval(sendPing, 2000);
-                
-                // Show network stats if enabled
-                if (showStats) {
-                    networkStats.classList.remove('hidden');
-                }
-                
-                // Show notification
-                showNotification('Connected to server');
-            };
-            
-            ws.onclose = () => {
-                connected = false;
-                status.textContent = 'Disconnected';
-                console.log('WebSocket connection closed');
-                
-                // Clear ping interval
-                clearInterval(pingInterval);
-                
-                // Hide network stats
-                networkStats.classList.add('hidden');
-                
-                // Show notification
-                showNotification('Disconnected from server. Reconnecting...');
-                
-                // Try to reconnect after a delay
-                setTimeout(connect, 3000);
-            };
-            
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                status.textContent = 'Connection error';
-                showNotification('Connection error occurred');
-            };
-            
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    
-                    switch(data.type) {
-                        case 'frame':
-                            handleJpegFrame(data);
-                            break;
-                            
-                        case 'delta':
-                            handleDeltaFrame(data);
-                            break;
-                            
-                        case 'video_frame':
-                            handleVideoFrame(data);
-                            break;
-                            
-                        case 'info':
-                            handleServerInfo(data);
-                            break;
-                            
-                        case 'ping':
-                            handlePingResponse();
-                            break;
-                            
-                        case 'quality':
-                            handleQualityUpdate(data);
-                            break;
-                            
-                        case 'monitors':
-                            handleMonitorList(data);
-                            break;
-                            
-                        case 'webrtc_offer':
-                            handleWebRTCOffer(data);
-                            break;
-                    }
-                } catch (e) {
-                    console.error('Error processing message:', e);
-                }
-            };
-        }
-        
-        // Handle JPEG frame
-        function handleJpegFrame(data) {
-            // Update screen dimensions if needed
-            if (screenWidth !== data.width || screenHeight !== data.height) {
-                screenWidth = data.width;
-                screenHeight = data.height;
-            }
-            
-            // Update the screen image
-            screen.src = 'data:image/jpeg;base64,' + data.image;
-            
-            updateFrameStats();
-        }
-        
-        // Handle delta frame (partial updates)
-        function handleDeltaFrame(data) {
-            if (data.tiles) {
-                // Handle the special case of a full frame
-                if (data.tiles["4294967295"]) { // 0xFFFFFFFF
-                    screen.src = 'data:image/jpeg;base64,' + data.tiles["4294967295"];
-                } else {
-                    // We got partial updates, apply them to the canvas
-                    for (const [tileIndex, tileData] of Object.entries(data.tiles)) {
-                        // Cache the tile image
-                        const tileImg = new Image();
-                        tileImg.onload = () => {
-                            // Calculate tile position
-                            const tx = tileIndex % tileWidth;
-                            const ty = Math.floor(tileIndex / tileWidth);
-                            const x = tx * tileSize;
-                            const y = ty * tileSize;
-                            
-                            // Draw on canvas
-                            ctx.drawImage(tileImg, x, y);
-                            
-                            // If this is the first frame, copy the canvas to the image
-                            if (!screen.complete || screen.naturalWidth === 0) {
-                                screen.src = canvasLayer.toDataURL('image/jpeg');
-                            }
-                        };
-                        tileImg.src = 'data:image/jpeg;base64,' + tileData;
-                        
-                        // Store in cache
-                        tileImages.set(parseInt(tileIndex), tileImg);
-                    }
-                }
-                
-                updateFrameStats();
-            }
-        }
-        
-        // Handle H.264/H.265/AV1 video frame
-        function handleVideoFrame(data) {
-            if (data.codec === 'h264' || data.codec === 'h265' || data.codec === 'av1') {
-                const videoData = base64ToArrayBuffer(data.data);
-                
-                // Use MSE if supported
-                if (window.MediaSource && MediaSource.isTypeSupported(`video/mp4; codecs="${getCodecString(data.codec)}"`)) {
-                    // Use Media Source Extensions for video playback
-                    if (!mediaSource) {
-                        initializeMediaSource(data.codec);
-                    }
-                    
-                    if (sourceBuffer && !sourceBuffer.updating) {
-                        // If we have queued data, append it first
-                        if (videoQueue.length > 0) {
-                            while (videoQueue.length > 0 && !sourceBuffer.updating) {
-                                sourceBuffer.appendBuffer(videoQueue.shift());
-                            }
-                        }
-                        
-                        // Append the current data if we can
-                        if (!sourceBuffer.updating) {
-                            try {
-                                sourceBuffer.appendBuffer(videoData);
-                            } catch (e) {
-                                console.error('Error appending video data:', e);
-                                // Try to recover by resetting the media source
-                                initializeMediaSource(data.codec);
-                            }
-                        } else {
-                            // Queue the data for later
-                            videoQueue.push(videoData);
-                            
-                            // Limit queue size to avoid memory issues
-                            if (videoQueue.length > 60) { // 2 seconds at 30fps
-                                videoQueue.shift(); // Remove oldest frame
-                            }
-                        }
-                    } else if (sourceBuffer) {
-                        // Queue the data for later
-                        videoQueue.push(videoData);
-                    }
-                } else {
-                    // Fallback: Convert to data URL and use video src
-                    // Note: This is inefficient but works as a fallback
-                    const blob = new Blob([videoData], { type: `video/mp4; codecs="${getCodecString(data.codec)}"` });
-                    const url = URL.createObjectURL(blob);
-                    videoScreen.src = url;
-                    
-                    // Clean up old URLs to avoid memory leaks
-                    setTimeout(() => URL.revokeObjectURL(url), 1000);
-                }
-                
-                updateFrameStats();
-            }
-        }
-        
-        // Get codec string for MSE
-        function getCodecString(codec) {
-            switch (codec) {
-                case 'h264': return 'avc1.42E01E';
-                case 'h265': return 'hev1.1.6.L93.B0';
-                case 'av1': return 'av01.0.04M.08';
-                default: return 'avc1.42E01E'; // Default to H.264
-            }
-        }
-        
-        // Initialize Media Source Extensions for video playback
-        function initializeMediaSource(codec) {
-            if (mediaSource) {
-                // Clean up existing media source
-                URL.revokeObjectURL(videoScreen.src);
-                if (sourceBuffer && mediaSource.readyState === 'open') {
-                    try {
-                        mediaSource.removeSourceBuffer(sourceBuffer);
-                    } catch (e) {
-                        console.error('Error removing source buffer:', e);
-                    }
-                }
-            }
-            
-            mediaSource = new MediaSource();
-            videoScreen.src = URL.createObjectURL(mediaSource);
-            
-            mediaSource.addEventListener('sourceopen', () => {
-                try {
-                    const codecString = getCodecString(codec);
-                    sourceBuffer = mediaSource.addSourceBuffer(`video/mp4; codecs="${codecString}"`);
-                    sourceBuffer.mode = 'segments';
-                    
-                    // Handle sourceBuffer errors
-                    sourceBuffer.addEventListener('error', (e) => {
-                        console.error('SourceBuffer error:', e);
-                    });
-                    
-                    // Handle sourceBuffer updates
-                    sourceBuffer.addEventListener('updateend', () => {
-                        // Process any queued data
-                        if (videoQueue.length > 0 && !sourceBuffer.updating) {
-                            try {
-                                sourceBuffer.appendBuffer(videoQueue.shift());
-                            } catch (e) {
-                                console.error('Error appending queued video data:', e);
-                                // Clear the queue to recover
-                                videoQueue = [];
-                            }
-                        }
-                    });
-                } catch (e) {
-                    console.error('Error adding source buffer:', e);
-                }
-            });
-            
-            // Handle media source errors
-            mediaSource.addEventListener('error', (e) => {
-                console.error('MediaSource error:', e);
-            });
-        }
-        
-        // Handle server info message
-        function handleServerInfo(data) {
-            screenWidth = data.width;
-            screenHeight = data.height;
-            tileWidth = data.tile_width;
-            tileHeight = data.tile_height;
-            tileSize = data.tile_size;
-            totalTiles = tileWidth * tileHeight;
-            
-            // Update codec and monitor info
-            codecInfo.textContent = data.codec || config.codec;
-            currentCodec = data.codec || config.codec;
-            codecDropdown.value = currentCodec;
-            
-            monitorInfo.textContent = data.monitor || `Monitor ${config.monitor}`;
-            
-            // Initialize canvas size
-            canvasLayer.width = screenWidth;
-            canvasLayer.height = screenHeight;
-            
-            // Set the appropriate display based on codec
-            if (data.codec === 'h264' || data.codec === 'h265' || data.codec === 'av1') {
-                screen.classList.add('hidden');
-                videoScreen.classList.remove('hidden');
-            } else {
-                screen.classList.remove('hidden');
-                videoScreen.classList.add('hidden');
-            }
-            
-            status.textContent = `Connected to ${data.hostname} (${screenWidth}x${screenHeight}) - ${data.monitor}`;
-            
-            // Clear tile cache
-            tileImages.clear();
-            
-            // Initialize WebRTC for audio if enabled
-            if (config.audio && data.audio) {
-                setupWebRTC(data.encryption);
-            }
-            
-            // Show notification with connection details
-            showNotification(`Connected to ${data.hostname} - ${data.monitor} (${screenWidth}x${screenHeight}) using ${data.codec}`);
-        }
-        
-        // Handle ping response for latency measurement
-        function handlePingResponse() {
-            const pingTime = Date.now() - lastPingTime;
-            latency = pingTime;
-            latencyElement.textContent = pingTime;
-            
-            // Send network stats to the server
-            sendNetworkStats();
-        }
-        
-        // Handle quality update from server
-        function handleQualityUpdate(data) {
-            qualityLevel = data.value;
-            qualityElement.textContent = qualityLevel;
-            qualitySlider.value = qualityLevel;
-            qualityValue.textContent = qualityLevel;
-        }
-        
-        // Handle monitor list update
-        function handleMonitorList(data) {
-            if (data.monitors && Array.isArray(data.monitors)) {
-                availableMonitors = data.monitors;
-                
-                // Update monitor dropdown
-                monitorDropdown.innerHTML = '';
-                
-                availableMonitors.forEach((monitor, index) => {
-                    const option = document.createElement('option');
-                    option.value = index;
-                    option.textContent = `${monitor.name} ${monitor.is_primary ? '(Primary)' : ''} - ${monitor.width}x${monitor.height}`;
-                    if (index === currentMonitor) {
-                        option.selected = true;
-                    }
-                    monitorDropdown.appendChild(option);
-                });
-                
-                // Show notification
-                showNotification(`${availableMonitors.length} monitors available`);
-            }
-        }
-        
-        // Handle WebRTC offer for audio
-        function handleWebRTCOffer(data) {
-            if (config.audio && !config.mute) {
-                setupWebRTCFromOffer(data.sdp);
-            }
-        }
-        
-        // Update FPS counter
-        function updateFrameStats() {
-            // Update FPS counter
-            frameCount++;
-            const now = Date.now();
-            if (now - lastFpsUpdate > 1000) {
-                const fps = frameCount / ((now - lastFpsUpdate) / 1000);
-                fpsElement.textContent = Math.round(fps);
-                frameCount = 0;
-                lastFpsUpdate = now;
-            }
-            
-            lastFrame = Date.now();
-        }
-        
-        // Send ping to measure latency
-        function sendPing() {
-            if (connected && ws.readyState === WebSocket.OPEN) {
-                lastPingTime = Date.now();
-                ws.send(JSON.stringify({ type: 'ping' }));
-            }
-        }
-        
-        // Send network statistics
-        function sendNetworkStats() {
-            if (connected && ws.readyState === WebSocket.OPEN) {
-                // Calculate estimated bandwidth based on recent frames
-                // This is a rough estimate - in a real implementation, we would track
-                // the amount of data received over time
-                const bandwidth = estimateBandwidth();
-                
-                ws.send(JSON.stringify({
-                    type: 'network_stats',
-                    latency,
-                    bandwidth,
-                    packet_loss: estimatePacketLoss()
-                }));
-            }
-        }
-        
-        // Estimate bandwidth (Mbps)
-        function estimateBandwidth() {
-            // This is a simple placeholder implementation
-            // In a real app, we would track actual data received over time
-            if (latency < 50) return 10.0;
-            if (latency < 100) return 5.0;
-            if (latency < 200) return 2.0;
-            return 1.0;
-        }
-        
-        // Estimate packet loss (percentage)
-        function estimatePacketLoss() {
-            // Placeholder implementation
-            if (latency > 200) return 5.0;
-            if (latency > 100) return 1.0;
-            return 0.0;
-        }
-
-        // Show notification
-        function showNotification(message, duration = 3000) {
-            const notification = document.createElement('div');
-            notification.className = 'notification';
-            notification.textContent = message;
-            notificationArea.appendChild(notification);
-            
-            // Remove notification after duration
-            setTimeout(() => {
-                notification.classList.add('fadeout');
-                setTimeout(() => {
-                    notification.remove();
-                }, 300);
-            }, duration);
-        }
-
-        // Input handling
-        function setupInputHandlers() {
-            const screenElem = document.getElementById('screen');
-            
-            // Mouse events
-            screen.addEventListener('mousedown', handleMouseDown);
-            videoScreen.addEventListener('mousedown', handleMouseDown);
-            
-            screen.addEventListener('mouseup', handleMouseUp);
-            videoScreen.addEventListener('mouseup', handleMouseUp);
-            
-            screen.addEventListener('mousemove', handleMouseMove);
-            videoScreen.addEventListener('mousemove', handleMouseMove);
-            
-            screen.addEventListener('wheel', handleMouseWheel);
-            videoScreen.addEventListener('wheel', handleMouseWheel);
-            
-            // Touch events for mobile
-            screenElem.addEventListener('touchstart', handleTouchStart, { passive: false });
-            screenElem.addEventListener('touchmove', handleTouchMove, { passive: false });
-            screenElem.addEventListener('touchend', handleTouchEnd);
-            screenElem.addEventListener('touchcancel', handleTouchEnd);
-            
-            // Prevent context menu
-            screen.addEventListener('contextmenu', (e) => e.preventDefault());
-            videoScreen.addEventListener('contextmenu', (e) => e.preventDefault());
-            
-            // Keyboard events
-            document.addEventListener('keydown', handleKeyDown);
-            document.addEventListener('keyup', handleKeyUp);
-            
-            // Monitor selection
-            monitorDropdown.addEventListener('change', (e) => {
-                const newMonitor = parseInt(e.target.value);
-                if (newMonitor !== currentMonitor) {
-                    switchMonitor(newMonitor);
-                }
-            });
-            
-            // Codec selection
-            codecDropdown.addEventListener('change', (e) => {
-                const newCodec = e.target.value;
-                if (newCodec !== currentCodec) {
-                    switchCodec(newCodec);
-                }
-            });
-            
-            // Settings
-            settingsBtn.addEventListener('click', toggleSettings);
-            settingsSave.addEventListener('click', saveSettings);
-            settingsCancel.addEventListener('click', () => {
-                settingsPanel.classList.add('hidden');
-            });
-            
-            // Quality slider
-            qualitySlider.addEventListener('input', (e) => {
-                qualityValue.textContent = e.target.value;
-            });
-            
-            // Stats toggle
-            settingStats.addEventListener('change', (e) => {
-                showStats = e.target.checked;
-                if (showStats) {
-                    networkStats.classList.remove('hidden');
-                } else {
-                    networkStats.classList.add('hidden');
-                }
-            });
-        }
-        
-        // Settings panel
-        function toggleSettings() {
-            settingsPanel.classList.toggle('hidden');
-        }
-        
-        function saveSettings() {
-            // Update config
-            config.stretch = settingStretch.checked;
-            config.audio = settingAudio.checked;
-            config.mute = settingMute.checked;
-            
-            // Apply settings
-            if (config.stretch) {
-                screen.style.objectFit = 'contain';
-                videoScreen.style.objectFit = 'contain';
-            } else {
-                screen.style.objectFit = 'scale-down';
-                videoScreen.style.objectFit = 'scale-down';
-            }
-            
-            audioElement.muted = config.mute;
-            
-            // If we changed audio setting, reconnect
-            if (config.audio !== settingAudio.checked) {
-                reconnect();
-            }
-            
-            // Apply quality setting
-            if (qualitySlider.value != qualityLevel) {
-                sendQualitySetting(qualitySlider.value);
-            }
-            
-            // Hide panel
-            settingsPanel.classList.add('hidden');
-            
-            // Show notification
-            showNotification('Settings saved');
-        }
-        
-        function sendQualitySetting(quality) {
-            if (connected && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                    type: 'set_quality',
-                    value: parseInt(quality)
-                }));
-            }
-        }
-        
-        // Mouse event handlers
-        function handleMouseDown(e) {
-            if (!connected) return;
-            
-            const activeScreen = currentCodec === 'jpeg' ? screen : videoScreen;
-            const rect = activeScreen.getBoundingClientRect();
-            const scaleX = screenWidth / rect.width;
-            const scaleY = screenHeight / rect.height;
-            
-            const x = Math.floor((e.clientX - rect.left) * scaleX);
-            const y = Math.floor((e.clientY - rect.top) * scaleY);
-            
-            let button = 'left';
-            if (e.button === 1) button = 'middle';
-            if (e.button === 2) button = 'right';
-            
-            sendInputEvent({
-                type: 'mousedown',
-                button,
-                x,
-                y,
-                monitor_id: getActiveMonitorId()
-            });
-            
-            e.preventDefault();
-        }
-        
-        function handleMouseUp(e) {
-            if (!connected) return;
-            
-            const activeScreen = currentCodec === 'jpeg' ? screen : videoScreen;
-            const rect = activeScreen.getBoundingClientRect();
-            const scaleX = screenWidth / rect.width;
-            const scaleY = screenHeight / rect.height;
-            
-            const x = Math.floor((e.clientX - rect.left) * scaleX);
-            const y = Math.floor((e.clientY - rect.top) * scaleY);
-            
-            let button = 'left';
-            if (e.button === 1) button = 'middle';
-            if (e.button === 2) button = 'right';
-            
-            sendInputEvent({
-                type: 'mouseup',
-                button,
-                x,
-                y,
-                monitor_id: getActiveMonitorId()
-            });
-            
-            e.preventDefault();
-        }
-        
-        function handleMouseMove(e) {
-            if (!connected) return;
-            
-            const activeScreen = currentCodec === 'jpeg' ? screen : videoScreen;
-            const rect = activeScreen.getBoundingClientRect();
-            const scaleX = screenWidth / rect.width;
-            const scaleY = screenHeight / rect.height;
-            
-            const x = Math.floor((e.clientX - rect.left) * scaleX);
-            const y = Math.floor((e.clientY - rect.top) * scaleY);
-            
-            sendInputEvent({
-                type: 'mousemove',
-                x,
-                y,
-                monitor_id: getActiveMonitorId()
-            });
-        }
-        
-        function handleMouseWheel(e) {
-            if (!connected) return;
-            
-            sendInputEvent({
-                type: 'wheel',
-                delta_y: e.deltaY,
-                delta_x: e.deltaX,
-                monitor_id: getActiveMonitorId()
-            });
-            
-            e.preventDefault();
-        }
-        
-        // Touch events for mobile devices
-        function handleTouchStart(e) {
-            if (!connected) return;
-            e.preventDefault();
-            
-            const touches = e.changedTouches;
-            
-            // Track touches
-            for (let i = 0; i < touches.length; i++) {
-                const touch = touches[i];
-                touchIdentifiers.set(touch.identifier, {
-                    x: touch.clientX,
-                    y: touch.clientY,
-                    time: Date.now()
-                });
-            }
-            
-            // Handle multi-touch gestures
-            if (touches.length >= 2) {
-                startGesture(e);
-            } else if (touches.length === 1) {
-                // Single touch - simulate mouse down
-                const touch = touches[0];
-                const activeScreen = currentCodec === 'jpeg' ? screen : videoScreen;
-                const rect = activeScreen.getBoundingClientRect();
-                const scaleX = screenWidth / rect.width;
-                const scaleY = screenHeight / rect.height;
-                
-                const x = Math.floor((touch.clientX - rect.left) * scaleX);
-                const y = Math.floor((touch.clientY - rect.top) * scaleY);
-                
-                sendInputEvent({
-                    type: 'mousedown',
-                    button: 'left',
-                    x,
-                    y,
-                    monitor_id: getActiveMonitorId()
-                });
-            }
-        }
-        
-        function handleTouchMove(e) {
-            if (!connected) return;
-            e.preventDefault();
-            
-            const touches = e.touches;
-            
-            // Handle multi-touch gestures
-            if (touches.length >= 2 && gestureInProgress) {
-                updateGesture(e);
-            } else if (touches.length === 1) {
-                // Single touch - simulate mouse move
-                const touch = touches[0];
-                const activeScreen = currentCodec === 'jpeg' ? screen : videoScreen;
-                const rect = activeScreen.getBoundingClientRect();
-                const scaleX = screenWidth / rect.width;
-                const scaleY = screenHeight / rect.height;
-                
-                const x = Math.floor((touch.clientX - rect.left) * scaleX);
-                const y = Math.floor((touch.clientY - rect.top) * scaleY);
-                
-                sendInputEvent({
-                    type: 'mousemove',
-                    x,
-                    y,
-                    monitor_id: getActiveMonitorId()
-                });
-            }
-        }
-        
-        function handleTouchEnd(e) {
-            if (!connected) return;
-            
-            const touches = e.changedTouches;
-            
-            // End gesture if needed
-            if (gestureInProgress && e.touches.length < 2) {
-                endGesture();
-            }
-            
-            // For each ended touch
-            for (let i = 0; i < touches.length; i++) {
-                const touch = touches[i];
-                
-                // Remove from tracked touches
-                touchIdentifiers.delete(touch.identifier);
-                
-                // If it's the last touch and not a gesture, simulate mouse up
-                if (e.touches.length === 0 && !gestureInProgress) {
-                    const activeScreen = currentCodec === 'jpeg' ? screen : videoScreen;
-                    const rect = activeScreen.getBoundingClientRect();
-                    const scaleX = screenWidth / rect.width;
-                    const scaleY = screenHeight / rect.height;
-                    
-                    const x = Math.floor((touch.clientX - rect.left) * scaleX);
-                    const y = Math.floor((touch.clientY - rect.top) * scaleY);
-                    
-                    sendInputEvent({
-                        type: 'mouseup',
-                        button: 'left',
-                        x,
-                        y,
-                        monitor_id: getActiveMonitorId()
-                    });
-                }
-            }
-        }
-        
-        // Gesture handling
-        function startGesture(e) {
-            gestureInProgress = true;
-            
-            const touches = e.touches;
-            if (touches.length >= 2) {
-                // Calculate initial distance and angle for pinch/rotate
-                const touch1 = touches[0];
-                const touch2 = touches[1];
-                
-                initialTouchDistance = getTouchDistance(touch1, touch2);
-                initialTouchAngle = getTouchAngle(touch1, touch2);
-                
-                // Show gesture indicator
-                const centerX = (touch1.clientX + touch2.clientX) / 2;
-                const centerY = (touch1.clientY + touch2.clientY) / 2;
-                
-                gestureIndicator.style.left = `${centerX}px`;
-                gestureIndicator.style.top = `${centerY}px`;
-                gestureIndicator.style.width = `${initialTouchDistance}px`;
-                gestureIndicator.style.height = `${initialTouchDistance}px`;
-                gestureIndicator.style.display = 'block';
-            }
-        }
-        
-        function updateGesture(e) {
-            if (!gestureInProgress) return;
-            
-            const touches = e.touches;
-            if (touches.length >= 2) {
-                const touch1 = touches[0];
-                const touch2 = touches[1];
-                
-                // Calculate current distance and angle
-                const currentDistance = getTouchDistance(touch1, touch2);
-                const currentAngle = getTouchAngle(touch1, touch2);
-                
-                // Calculate scale and rotation
-                const scale = currentDistance / initialTouchDistance;
-                const rotation = currentAngle - initialTouchAngle;
-                
-                // Update gesture indicator
-                const centerX = (touch1.clientX + touch2.clientX) / 2;
-                const centerY = (touch1.clientY + touch2.clientY) / 2;
-                
-                gestureIndicator.style.left = `${centerX}px`;
-                gestureIndicator.style.top = `${centerY}px`;
-                gestureIndicator.style.width = `${currentDistance}px`;
-                gestureIndicator.style.height = `${currentDistance}px`;
-                gestureIndicator.style.transform = `translate(-50%, -50%) rotate(${rotation}deg)`;
-                
-                // Send gesture event
-                if (Math.abs(scale - 1) > 0.05 || Math.abs(rotation) > 5) {
-                    sendInputEvent({
-                        type: 'gesture',
-                        gesture_type: 'pinch',
-                        scale,
-                        rotation,
-                        monitor_id: getActiveMonitorId()
-                    });
-                    
-                    // Reset initial values to prevent too rapid changes
-                    initialTouchDistance = currentDistance;
-                    initialTouchAngle = currentAngle;
-                }
-            }
-        }
-        
-        function endGesture() {
-            gestureInProgress = false;
-            gestureIndicator.style.display = 'none';
-        }
-        
-        function getTouchDistance(touch1, touch2) {
-            const dx = touch1.clientX - touch2.clientX;
-            const dy = touch1.clientY - touch2.clientY;
-            return Math.sqrt(dx * dx + dy * dy);
-        }
-        
-        function getTouchAngle(touch1, touch2) {
-            return Math.atan2(
-                touch2.clientY - touch1.clientY,
-                touch2.clientX - touch1.clientX
-            ) * 180 / Math.PI;
-        }
-        
-        // Keyboard event handlers
-        function handleKeyDown(e) {
-            if (!connected) return;
-            
-            // Don't capture browser shortcuts
-            if (e.ctrlKey && (e.key === 'r' || e.key === 'F5' || e.key === 'w')) return;
-            
-            const modifiers = [];
-            if (e.ctrlKey) modifiers.push('Control');
-            if (e.altKey) modifiers.push('Alt');
-            if (e.shiftKey) modifiers.push('Shift');
-            if (e.metaKey) modifiers.push('Meta');
-            
-            sendInputEvent({
-                type: 'keydown',
-                key: e.key,
-                code: e.code,
-                modifiers,
-                repeat: e.repeat
-            });
-            
-            // Prevent default for most keys when focused on remote screen
-            const activeScreen = currentCodec === 'jpeg' ? screen : videoScreen;
-            if (document.activeElement === activeScreen || activeScreen.contains(document.activeElement)) {
-                e.preventDefault();
-            }
-        }
-        
-        function handleKeyUp(e) {
-            if (!connected) return;
-            
-            const modifiers = [];
-            if (e.ctrlKey) modifiers.push('Control');
-            if (e.altKey) modifiers.push('Alt');
-            if (e.shiftKey) modifiers.push('Shift');
-            if (e.metaKey) modifiers.push('Meta');
-            
-            sendInputEvent({
-                type: 'keyup',
-                key: e.key,
-                code: e.code,
-                modifiers
-            });
-            
-            // Prevent default for most keys when focused on remote screen
-            const activeScreen = currentCodec === 'jpeg' ? screen : videoScreen;
-            if (document.activeElement === activeScreen || activeScreen.contains(document.activeElement)) {
-                e.preventDefault();
-            }
-        }
-        
-        // Send hotkey combinations
-        function sendHotKey(keys) {
-            if (!connected) return;
-            
-            sendInputEvent({
-                type: 'hotkey',
-                combination: keys
-            });
-        }
-
-        // Send input event to server
-        function sendInputEvent(event) {
-            if (connected && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify(event));
-            }
-        }
-        
-        // Get the active monitor ID
-        function getActiveMonitorId() {
-            if (availableMonitors.length > 0 && currentMonitor < availableMonitors.length) {
-                return availableMonitors[currentMonitor].id;
-            }
-            return null;
-        }
-        
-        // Switch to a different monitor
-        function switchMonitor(newMonitor) {
-            if (newMonitor !== currentMonitor && connected) {
-                showNotification(`Switching to monitor ${newMonitor}`);
-                
-                // Disconnect current connection
-                ws.close();
-                
-                // Update monitor setting
-                currentMonitor = newMonitor;
-                
-                // Clear display
-                screen.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
-                videoScreen.src = '';
-                
-                // Reconnect with new monitor
-                setTimeout(connect, 500);
-            }
-        }
-        
-        // Switch to a different codec
-        function switchCodec(newCodec) {
-            if (newCodec !== currentCodec && connected) {
-                showNotification(`Switching to ${newCodec} codec`);
-                
-                // Disconnect current connection
-                ws.close();
-                
-                // Update codec setting
-                currentCodec = newCodec;
-                
-                // Clear display
-                screen.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
-                videoScreen.src = '';
-                
-                // Reconnect with new codec
-                setTimeout(connect, 500);
-            }
-        }
-        
-        // Reconnect to server
-        function reconnect() {
-            if (connected) {
-                ws.close();
-            }
-            setTimeout(connect, 500);
-        }
-
-        // Fullscreen toggle
-        fullscreenBtn.addEventListener('click', () => {
-            if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen().catch(err => {
-                    console.error(`Error attempting to enable fullscreen: ${err.message}`);
-                    showNotification(`Fullscreen error: ${err.message}`);
-                });
-            } else {
-                document.exitFullscreen();
-            }
-        });
-
-        // Disconnect button
-        disconnectBtn.addEventListener('click', () => {
-            if (connected) {
-                ws.close();
-            }
-            window.location.href = '/';
-        });
-
-        // WebRTC for audio
-        async function setupWebRTC(encryptionKey) {
-            if (!config.audio || config.mute) return;
-            
-            try {
-                // Initialize WebRTC if it hasn't been already
-                if (!peerConnection) {
-                    peerConnection = new RTCPeerConnection({
-                        iceServers: [
-                            { urls: 'stun:stun.l.google.com:19302' },
-                            { urls: 'stun:stun1.l.google.com:19302' }
-                        ]
-                    });
-                    
-                    // Set up audio elements when streams are received
-                    peerConnection.ontrack = (event) => {
-                        if (event.track.kind === 'audio') {
-                            audioStream = event.streams[0];
-                            audioElement.srcObject = audioStream;
-                            console.log('Received audio stream');
-                            showNotification('Audio connected');
-                        }
-                    };
-                    
-                    // Log ICE connection state changes
-                    peerConnection.oniceconnectionstatechange = () => {
-                        console.log('ICE connection state:', peerConnection.iceConnectionState);
-                        if (peerConnection.iceConnectionState === 'connected') {
-                            showNotification('Audio connected');
-                        } else if (peerConnection.iceConnectionState === 'disconnected' || 
-                                  peerConnection.iceConnectionState === 'failed') {
-                            showNotification('Audio connection lost');
-                        }
-                    };
-                }
-            } catch (err) {
-                console.error('WebRTC setup failed:', err);
-                showNotification('WebRTC audio setup failed');
-            }
-        }
-        
-        // Set up WebRTC from a server offer
-        async function setupWebRTCFromOffer(offerSdp) {
-            try {
-                if (!peerConnection) {
-                    await setupWebRTC();
-                }
-                
-                // Set the remote description (offer)
-                const offer = new RTCSessionDescription({
-                    type: 'offer',
-                    sdp: offerSdp
-                });
-                
-                await peerConnection.setRemoteDescription(offer);
-                
-                // Create an answer
-                const answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer);
-                
-                // Send the answer to the server
-                if (connected && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({
-                        type: 'webrtc_answer',
-                        sdp: answer.sdp
-                    }));
-                }
-            } catch (err) {
-                console.error('WebRTC offer handling failed:', err);
-                showNotification('WebRTC connection error');
-            }
-        }
-        
-        // Utility function to convert base64 to ArrayBuffer
-        function base64ToArrayBuffer(base64) {
-            const binaryString = atob(base64);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-            return bytes.buffer;
-        }
-
-        // Start the connection
-        connect();
-        setupInputHandlers();
     </script>
+    <script src="/static/kvm-template-parts.js"></script>
+    <script src="/static/kvm-client.js"></script>
 </body>
 </html>

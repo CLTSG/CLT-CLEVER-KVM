@@ -1,6 +1,7 @@
 use axum::{
     extract::{ws::WebSocketUpgrade, Query},
     response::{Html, IntoResponse},
+    http::{StatusCode, header},
 };
 use std::collections::HashMap;
 use std::fs;
@@ -27,10 +28,10 @@ pub async fn kvm_client_handler(Query(params): Query<HashMap<String, String>>) -
         ("{{encryption}}", encryption.to_string()),
         ("{{monitor}}", monitor.to_string()),
         ("{{codec}}", codec.to_string()),
-        ("{{fit_mode}}", if stretch { "contain".to_string() } else { "scale-down".to_string() }),
-        ("{{display_mode}}", if remote_only { "position: absolute;".to_string() } else { "".to_string() }),
         ("{{mute_attr}}", if mute { "muted".to_string() } else { "".to_string() }),
-        ("{{toolbar_class}}", if remote_only { "hidden".to_string() } else { "".to_string() }),
+        ("{{stretch_checked}}", if stretch { "checked".to_string() } else { "".to_string() }),
+        ("{{audio_checked}}", if audio { "checked".to_string() } else { "".to_string() }),
+        ("{{mute_checked}}", if mute { "checked".to_string() } else { "".to_string() }),
     ];
 
     // Load the HTML template
@@ -49,13 +50,54 @@ pub async fn kvm_client_handler(Query(params): Query<HashMap<String, String>>) -
             // If template loading fails, return a simple error page
             log::error!("Failed to load KVM template: {}", err);
             format!(
-                "<html><body><h1>Error</h1><p>Failed to load KVM client template: {}</p></body></html>",
+                r#"<!DOCTYPE html>
+<html><body>
+<h1>Error</h1>
+<p>Failed to load KVM client template: {}</p>
+<p>Please ensure the web-client directory is properly configured.</p>
+</body></html>"#,
                 err
             )
         }
     };
 
     Html(html)
+}
+
+// New handler for serving static files
+pub async fn static_file_handler(
+    axum::extract::Path(path): axum::extract::Path<String>
+) -> impl IntoResponse {
+    let file_path = format!("web-client/{}", path);
+    
+    match fs::read(&file_path) {
+        Ok(contents) => {
+            // Determine content type based on file extension
+            let content_type = match path.split('.').last() {
+                Some("css") => "text/css",
+                Some("js") => "application/javascript",
+                Some("html") => "text/html",
+                Some("png") => "image/png",
+                Some("jpg") | Some("jpeg") => "image/jpeg",
+                Some("svg") => "image/svg+xml",
+                Some("ico") => "image/x-icon",
+                _ => "application/octet-stream",
+            };
+            
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, content_type)],
+                contents
+            )
+        },
+        Err(_) => {
+            (
+                StatusCode::NOT_FOUND,
+                [(header::CONTENT_TYPE, "text/plain")],
+                b"File not found".to_vec()
+            )
+        }
+    }
 }
 
 pub async fn ws_handler(ws: WebSocketUpgrade, Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
