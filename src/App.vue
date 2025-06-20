@@ -1,7 +1,6 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, onMounted, reactive, computed } from "vue";
 import { invoke } from "@tauri-apps/api/tauri";
-import { listen } from "@tauri-apps/api/event";
 
 const serverStatus = ref(false);
 const serverUrl = ref("");
@@ -10,12 +9,93 @@ const loading = ref(false);
 const errorMessage = ref("");
 const showAdvancedSettings = ref(false);
 const showLogs = ref(false);
-const deltaEncoding = ref(true);
-const adaptiveQuality = ref(true);
-const encryptionEnabled = ref(false);
-const webrtcEnabled = ref(false);
 const debugLog = ref("");
 const errorLog = ref("");
+const showPresets = ref(false);
+const selectedPreset = ref("default");
+
+// Server settings
+const settings = reactive({
+  deltaEncoding: true,
+  adaptiveQuality: true,
+  encryptionEnabled: false,
+  useWebRTC: true,  // Default to true for better audio
+  useH264: true,
+  useH265: false,
+  useAV1: false,
+  hardwareAcceleration: false, // Default to software encoding
+  selectedMonitor: 0,
+  audioBitrate: 128,  // kbps
+  videoBitrate: 4000, // kbps
+  framerate: 30
+});
+
+// Available monitors
+const monitors = ref([]);
+const loadingMonitors = ref(false);
+
+// Computed properties for codec selection
+const selectedCodec = computed(() => {
+  if (settings.useH265) return 'h265';
+  if (settings.useAV1) return 'av1';
+  return 'h264'; // Default
+});
+
+// Presets for different use cases
+const presets = {
+  default: {
+    deltaEncoding: true,
+    adaptiveQuality: true,
+    encryptionEnabled: false,
+    useWebRTC: true,
+    useH264: true,
+    useH265: false,
+    useAV1: false,
+    hardwareAcceleration: false, // Use software by default
+    audioBitrate: 128,
+    videoBitrate: 4000,
+    framerate: 30
+  },
+  highQuality: {
+    deltaEncoding: true,
+    adaptiveQuality: true,
+    encryptionEnabled: false,
+    useWebRTC: true,
+    useH264: false,
+    useH265: true,  // Use H.265 for better quality
+    useAV1: false,
+    hardwareAcceleration: true, // Enable hardware for high quality
+    audioBitrate: 192,
+    videoBitrate: 8000, // Higher bitrate
+    framerate: 60       // Higher framerate
+  },
+  lowBandwidth: {
+    deltaEncoding: true,
+    adaptiveQuality: true,
+    encryptionEnabled: false,
+    useWebRTC: true,
+    useH264: false,
+    useH265: true,  // H.265 is more efficient
+    useAV1: false,
+    hardwareAcceleration: false, // Software encoding for compatibility
+    audioBitrate: 64,   // Lower audio bitrate
+    videoBitrate: 2000, // Lower video bitrate
+    framerate: 24       // Lower framerate
+  },
+  secure: {
+    deltaEncoding: true,
+    adaptiveQuality: true,
+    encryptionEnabled: true, // Enable encryption
+    useWebRTC: true,
+    useH264: true,
+    useH265: false,
+    useAV1: false,
+    hardwareAcceleration: false, // Software encoding for security/compatibility
+    audioBitrate: 128,
+    videoBitrate: 4000,
+    framerate: 30
+  }
+};
 
 // Check server status on mount
 onMounted(async () => {
@@ -24,23 +104,69 @@ onMounted(async () => {
     if (serverStatus.value) {
       serverUrl.value = await invoke("get_server_url");
     }
+    
+    // Load available monitors
+    await loadMonitors();
   } catch (error) {
     errorMessage.value = error;
   }
 });
+
+async function loadMonitors() {
+  loadingMonitors.value = true;
+  try {
+    monitors.value = await invoke("get_available_monitors");
+    
+    // If we have monitors, select the primary one by default
+    const primaryIndex = monitors.value.findIndex(m => m.is_primary);
+    if (primaryIndex >= 0) {
+      settings.selectedMonitor = primaryIndex;
+    }
+  } catch (error) {
+    console.error("Failed to load monitors:", error);
+    monitors.value = [];
+  } finally {
+    loadingMonitors.value = false;
+  }
+}
+
+function applyPreset(presetName) {
+  const preset = presets[presetName];
+  if (preset) {
+    // Apply all preset settings
+    Object.keys(preset).forEach(key => {
+      if (key in settings) {
+        settings[key] = preset[key];
+      }
+    });
+    selectedPreset.value = presetName;
+    showPresets.value = false;
+  }
+}
 
 async function startServer() {
   loading.value = true;
   errorMessage.value = "";
   
   try {
+    // Update codec selection based on computed property
+    const codec = selectedCodec.value;
+    
     serverUrl.value = await invoke("start_server", { 
       port: serverPort.value,
       options: {
-        deltaEncoding: deltaEncoding.value,
-        adaptiveQuality: adaptiveQuality.value,
-        encryption: encryptionEnabled.value,
-        webrtc: webrtcEnabled.value
+        deltaEncoding: settings.deltaEncoding,
+        adaptiveQuality: settings.adaptiveQuality,
+        encryption: settings.encryptionEnabled,
+        webrtc: settings.useWebRTC,
+        h264: codec === 'h264',
+        h265: codec === 'h265',
+        av1: codec === 'av1',
+        hardwareAcceleration: settings.hardwareAcceleration,
+        monitor: settings.selectedMonitor,
+        audioBitrate: settings.audioBitrate * 1000, // Convert to bps
+        videoBitrate: settings.videoBitrate * 1000, // Convert to bps
+        framerate: settings.framerate
       }
     });
     serverStatus.value = true;
@@ -73,12 +199,19 @@ function openUrl() {
     // Add advanced parameters if enabled
     const params = [];
     
-    if (webrtcEnabled.value) {
+    if (settings.useWebRTC) {
       params.push('audio=true');
     }
     
-    if (encryptionEnabled.value) {
+    if (settings.encryptionEnabled) {
       params.push('encryption=true');
+    }
+    
+    // Use the selected codec
+    params.push(`codec=${selectedCodec.value}`);
+    
+    if (settings.selectedMonitor > 0) {
+      params.push(`monitor=${settings.selectedMonitor}`);
     }
     
     if (params.length > 0) {
@@ -96,12 +229,19 @@ function copyUrl() {
     // Add advanced parameters if enabled
     const params = [];
     
-    if (webrtcEnabled.value) {
+    if (settings.useWebRTC) {
       params.push('audio=true');
     }
     
-    if (encryptionEnabled.value) {
+    if (settings.encryptionEnabled) {
       params.push('encryption=true');
+    }
+    
+    // Use the selected codec
+    params.push(`codec=${selectedCodec.value}`);
+    
+    if (settings.selectedMonitor > 0) {
+      params.push(`monitor=${settings.selectedMonitor}`);
     }
     
     if (params.length > 0) {
@@ -137,7 +277,7 @@ async function refreshLogs() {
 <template>
   <main class="container">
     <h1>Clever KVM</h1>
-    <p class="description">Remote desktop system for your local network</p>
+    <p class="description">High-performance remote desktop system for your local network</p>
 
     <div class="card">
       <h2>Server Status</h2>
@@ -159,6 +299,48 @@ async function refreshLogs() {
           <input id="port" v-model="serverPort" type="number" min="1024" max="65535" />
         </div>
         
+        <div class="form-group" v-if="monitors.length > 0">
+          <label for="monitor">Monitor:</label>
+          <select id="monitor" v-model="settings.selectedMonitor">
+            <option v-for="(monitor, index) in monitors" :key="index" :value="index">
+              {{ monitor.name }} {{ monitor.is_primary ? '(Primary)' : '' }} - {{ monitor.width }}x{{ monitor.height }}
+            </option>
+          </select>
+        </div>
+        
+        <div class="presets-section">
+          <button @click="showPresets = !showPresets" class="text-button">
+            {{ showPresets ? '⬆️ Hide Presets' : '⬇️ Show Presets' }}
+          </button>
+          
+          <div v-if="showPresets" class="presets-container">
+            <button 
+              @click="applyPreset('default')" 
+              class="preset-button"
+              :class="{ 'active-preset': selectedPreset === 'default' }">
+              Default
+            </button>
+            <button 
+              @click="applyPreset('highQuality')" 
+              class="preset-button"
+              :class="{ 'active-preset': selectedPreset === 'highQuality' }">
+              High Quality
+            </button>
+            <button 
+              @click="applyPreset('lowBandwidth')" 
+              class="preset-button"
+              :class="{ 'active-preset': selectedPreset === 'lowBandwidth' }">
+              Low Bandwidth
+            </button>
+            <button 
+              @click="applyPreset('secure')" 
+              class="preset-button"
+              :class="{ 'active-preset': selectedPreset === 'secure' }">
+              Secure
+            </button>
+          </div>
+        </div>
+        
         <div class="advanced-toggle">
           <button @click="toggleAdvancedSettings" class="text-button">
             {{ showAdvancedSettings ? '⬆️ Hide Advanced Settings' : '⬇️ Show Advanced Settings' }}
@@ -167,30 +349,70 @@ async function refreshLogs() {
         
         <div v-if="showAdvancedSettings" class="advanced-settings">
           <div class="setting-group">
+            <h4>Codec Selection</h4>
             <label>
-              <input type="checkbox" v-model="deltaEncoding" />
-              Delta Encoding (only send changed screen parts)
+              <input type="radio" v-model="settings.useH264" :value="true" 
+                     @change="settings.useH265 = false; settings.useAV1 = false" />
+              H.264 (Best compatibility)
+            </label>
+            <label>
+              <input type="radio" v-model="settings.useH265" :value="true" 
+                     @change="settings.useH264 = false; settings.useAV1 = false" />
+              H.265/HEVC (Better quality, lower bandwidth)
+            </label>
+            <label>
+              <input type="radio" v-model="settings.useAV1" :value="true" 
+                     @change="settings.useH264 = false; settings.useH265 = false" />
+              AV1 (Experimental, newest codec)
             </label>
           </div>
           
           <div class="setting-group">
+            <h4>Performance</h4>
             <label>
-              <input type="checkbox" v-model="adaptiveQuality" />
+              <input type="checkbox" v-model="settings.hardwareAcceleration" />
+              Hardware Acceleration (uses GPU encoding if available)
+            </label>
+            <label>
+              <input type="checkbox" v-model="settings.deltaEncoding" />
+              Delta Encoding (only send changed screen parts)
+            </label>
+            <label>
+              <input type="checkbox" v-model="settings.adaptiveQuality" />
               Adaptive Quality (adjust based on network conditions)
             </label>
           </div>
           
           <div class="setting-group">
-            <label>
-              <input type="checkbox" v-model="encryptionEnabled" />
-              Enable Encryption (secure connection)
-            </label>
+            <h4>Bitrates & Quality</h4>
+            <div class="slider-group">
+              <label for="video-bitrate">Video Bitrate: {{ settings.videoBitrate }} kbps</label>
+              <input type="range" id="video-bitrate" v-model="settings.videoBitrate"
+                     min="1000" max="12000" step="500" />
+            </div>
+            
+            <div class="slider-group">
+              <label for="audio-bitrate">Audio Bitrate: {{ settings.audioBitrate }} kbps</label>
+              <input type="range" id="audio-bitrate" v-model="settings.audioBitrate"
+                     min="32" max="256" step="16" />
+            </div>
+            
+            <div class="slider-group">
+              <label for="framerate">Framerate: {{ settings.framerate }} FPS</label>
+              <input type="range" id="framerate" v-model="settings.framerate"
+                     min="15" max="60" step="5" />
+            </div>
           </div>
           
           <div class="setting-group">
+            <h4>Features</h4>
             <label>
-              <input type="checkbox" v-model="webrtcEnabled" />
-              Enable WebRTC Audio (experimental)
+              <input type="checkbox" v-model="settings.encryptionEnabled" />
+              Enable Encryption (secure connection)
+            </label>
+            <label>
+              <input type="checkbox" v-model="settings.useWebRTC" />
+              Enable WebRTC Audio
             </label>
           </div>
         </div>
@@ -242,8 +464,16 @@ async function refreshLogs() {
           <td><code>encryption=true</code></td>
           <td>Enable encrypted connection</td>
         </tr>
+        <tr>
+          <td><code>codec=h264|h265|av1</code></td>
+          <td>Select video codec (h264 is default)</td>
+        </tr>
+        <tr>
+          <td><code>monitor=1</code></td>
+          <td>Select specific monitor to display</td>
+        </tr>
       </table>
-      <p class="example">Example: <code>http://hostname:9921/kvm?stretch=true;mute=true</code></p>
+      <p class="example">Example: <code>http://hostname:9921/kvm?stretch=true;codec=h265;monitor=1</code></p>
       
       <div class="features-section">
         <h3>Advanced Features</h3>
@@ -258,7 +488,21 @@ async function refreshLogs() {
             <strong>Encryption:</strong> Secures the connection between client and server.
           </li>
           <li>
-            <strong>WebRTC Audio:</strong> Enables audio streaming (experimental feature).
+            <strong>WebRTC Audio:</strong> Enables audio streaming with low latency.
+          </li>
+          <li>
+            <strong>Multiple Codecs:</strong> 
+            <ul>
+              <li><strong>H.264:</strong> Widely compatible, good performance.</li>
+              <li><strong>H.265/HEVC:</strong> Better quality at lower bitrates, less compatible.</li>
+              <li><strong>AV1:</strong> Next-generation codec, best quality but limited hardware support.</li>
+            </ul>
+          </li>
+          <li>
+            <strong>Hardware Acceleration:</strong> Uses GPU for encoding when available, reducing CPU usage.
+          </li>
+          <li>
+            <strong>Multi-monitor Support:</strong> Choose which monitor to share from systems with multiple displays.
           </li>
         </ul>
       </div>
@@ -329,6 +573,13 @@ h3 {
   margin-bottom: 0.5rem;
 }
 
+h4 {
+  color: #2c3e50;
+  font-size: 1rem;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
 .status-indicator {
   width: 16px;
   height: 16px;
@@ -392,12 +643,12 @@ h3 {
   min-width: 60px;
 }
 
-input[type="number"] {
+input[type="number"], select {
   padding: 0.5rem;
   border: 1px solid #ddd;
   border-radius: 4px;
   font-size: 1rem;
-  width: 100px;
+  min-width: 200px;
 }
 
 .advanced-toggle, .log-toggle {
@@ -544,5 +795,48 @@ code {
   max-height: 300px;
   overflow-y: auto;
   border: 1px solid #eee;
+}
+
+.presets-section {
+  margin: 1rem 0;
+}
+
+.presets-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.preset-button {
+  background-color: #f8f9fa;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.preset-button:hover {
+  background-color: #e9ecef;
+}
+
+.active-preset {
+  background-color: #3498db;
+  color: white;
+  border-color: #2980b9;
+}
+
+.slider-group {
+  margin-bottom: 12px;
+}
+
+.slider-group label {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.slider-group input[type="range"] {
+  width: 100%;
 }
 </style>

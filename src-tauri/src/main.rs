@@ -6,13 +6,17 @@ mod input;
 mod server;
 mod utils;
 mod logging;
+mod codec;
+mod audio;
+mod system_check; // Add system check module
 
 use crate::server::WebSocketServer;
+use crate::capture::ScreenCapture;
 use local_ip_address::local_ip;
 use std::sync::{Arc, Mutex};
 use tauri::{Manager};
 use tokio::runtime::Runtime;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use log::{info, warn, error, debug};
 
 const APP_NAME: &str = "clever-kvm";
@@ -25,6 +29,20 @@ struct ServerOptions {
     adaptive_quality: Option<bool>,
     encryption: Option<bool>,
     webrtc: Option<bool>,
+    h264: Option<bool>,
+    monitor: Option<usize>,
+}
+
+// Monitor info for frontend
+#[derive(Debug, Serialize)]
+struct MonitorInfo {
+    id: String,
+    name: String,
+    is_primary: bool,
+    width: usize,
+    height: usize,
+    position_x: i32,
+    position_y: i32,
 }
 
 // Shared state between Tauri and WebSocket server
@@ -52,6 +70,27 @@ impl ServerState {
 }
 
 #[tauri::command]
+fn get_available_monitors() -> Result<Vec<MonitorInfo>, String> {
+    match ScreenCapture::get_all_monitors() {
+        Ok(monitors) => {
+            // Convert to frontend-friendly structure
+            let frontend_monitors = monitors.into_iter().map(|m| MonitorInfo {
+                id: m.id,
+                name: m.name,
+                is_primary: m.is_primary,
+                width: m.width,
+                height: m.height,
+                position_x: m.position_x,
+                position_y: m.position_y,
+            }).collect();
+            
+            Ok(frontend_monitors)
+        },
+        Err(e) => Err(format!("Failed to get monitors: {}", e)),
+    }
+}
+
+#[tauri::command]
 fn start_server(app_handle: tauri::AppHandle, port: Option<u16>, options: Option<ServerOptions>) -> Result<String, String> {
     let port = port.unwrap_or(9921);
     let state = app_handle.state::<Arc<Mutex<ServerState>>>();
@@ -64,8 +103,8 @@ fn start_server(app_handle: tauri::AppHandle, port: Option<u16>, options: Option
     
     // Store options
     if let Some(opts) = options {
-        debug!("Server options: delta_encoding={:?}, adaptive_quality={:?}, encryption={:?}, webrtc={:?}",
-               opts.delta_encoding, opts.adaptive_quality, opts.encryption, opts.webrtc);
+        debug!("Server options: delta_encoding={:?}, adaptive_quality={:?}, encryption={:?}, webrtc={:?}, h264={:?}, monitor={:?}",
+               opts.delta_encoding, opts.adaptive_quality, opts.encryption, opts.webrtc, opts.h264, opts.monitor);
         state.options = opts;
     }
 
@@ -201,7 +240,8 @@ fn main() {
             stop_server,
             get_server_status,
             get_server_url,
-            get_logs
+            get_logs,
+            get_available_monitors
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,4 +1,13 @@
 fn main() {
+    // Set FFmpeg environment variables for compilation
+    if cfg!(target_os = "linux") {
+        println!("cargo:rustc-link-lib=avformat");
+        println!("cargo:rustc-link-lib=avcodec");
+        println!("cargo:rustc-link-lib=avutil");
+        println!("cargo:rustc-link-lib=swscale");
+        println!("cargo:rustc-link-lib=swresample");
+    }
+
     // Create web-client directory if it doesn't exist
     let web_client_dir = std::path::Path::new("web-client");
     if !web_client_dir.exists() {
