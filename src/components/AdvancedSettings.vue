@@ -5,21 +5,24 @@
     </button>
   </div>
   
-  <div v-if="showAdvancedSettings" class="advanced-settings">
+  <div v-if="showAdvancedSettings" class="advanced-settings" :class="{ disabled: disabled }">
     <div class="setting-group">
       <h4>Codec Selection</h4>
       <label>
         <input type="radio" v-model="settings.useH264" :value="true" 
+               :disabled="disabled"
                @change="settings.useH265 = false; settings.useAV1 = false" />
         H.264 (Best compatibility)
       </label>
       <label>
         <input type="radio" v-model="settings.useH265" :value="true" 
+               :disabled="disabled"
                @change="settings.useH264 = false; settings.useAV1 = false" />
         H.265/HEVC (Better quality, lower bandwidth)
       </label>
       <label>
         <input type="radio" v-model="settings.useAV1" :value="true" 
+               :disabled="disabled"
                @change="settings.useH264 = false; settings.useH265 = false" />
         AV1 (Experimental, newest codec)
       </label>
@@ -28,15 +31,15 @@
     <div class="setting-group">
       <h4>Performance</h4>
       <label>
-        <input type="checkbox" v-model="settings.hardwareAcceleration" />
+        <input type="checkbox" v-model="settings.hardwareAcceleration" :disabled="disabled" />
         Hardware Acceleration (uses GPU encoding if available)
       </label>
       <label>
-        <input type="checkbox" v-model="settings.deltaEncoding" />
+        <input type="checkbox" v-model="settings.deltaEncoding" :disabled="disabled" />
         Delta Encoding (only send changed screen parts)
       </label>
       <label>
-        <input type="checkbox" v-model="settings.adaptiveQuality" />
+        <input type="checkbox" v-model="settings.adaptiveQuality" :disabled="disabled" />
         Adaptive Quality (adjust based on network conditions)
       </label>
     </div>
@@ -46,30 +49,30 @@
       <div class="slider-group">
         <label for="video-bitrate">Video Bitrate: {{ settings.videoBitrate }} kbps</label>
         <input type="range" id="video-bitrate" v-model="settings.videoBitrate"
-               min="1000" max="12000" step="500" />
+               min="1000" max="12000" step="500" :disabled="disabled" />
       </div>
       
       <div class="slider-group">
         <label for="audio-bitrate">Audio Bitrate: {{ settings.audioBitrate }} kbps</label>
         <input type="range" id="audio-bitrate" v-model="settings.audioBitrate"
-               min="32" max="256" step="16" />
+               min="32" max="256" step="16" :disabled="disabled" />
       </div>
       
       <div class="slider-group">
         <label for="framerate">Framerate: {{ settings.framerate }} FPS</label>
         <input type="range" id="framerate" v-model="settings.framerate"
-               min="15" max="60" step="5" />
+               min="15" max="60" step="5" :disabled="disabled" />
       </div>
     </div>
     
     <div class="setting-group">
       <h4>Features</h4>
       <label>
-        <input type="checkbox" v-model="settings.encryptionEnabled" />
+        <input type="checkbox" v-model="settings.encryptionEnabled" :disabled="disabled" />
         Enable Encryption (secure connection)
       </label>
       <label>
-        <input type="checkbox" v-model="settings.useWebRTC" />
+        <input type="checkbox" v-model="settings.useWebRTC" :disabled="disabled" />
         Enable WebRTC Audio
       </label>
     </div>
@@ -80,7 +83,11 @@
 import { ref } from 'vue';
 
 defineProps({
-  settings: Object
+  settings: Object,
+  disabled: {
+    type: Boolean,
+    default: false
+  }
 });
 
 const showAdvancedSettings = ref(false);
@@ -142,5 +149,15 @@ h4 {
   font-size: 1rem;
   margin-top: 1rem;
   margin-bottom: 0.5rem;
+}
+
+.advanced-settings.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 </style>

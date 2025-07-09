@@ -8,7 +8,7 @@
     <div v-if="serverStatus" class="server-info">
       <p>Server URL:</p>
       <div class="url-display">
-        <span class="url">{{ serverUrl }}</span>
+        <span class="url">{{ displayUrl }}</span>
         <button class="icon-button" @click="openUrl" title="Open in browser">🌐</button>
         <button class="icon-button" @click="copyUrl" title="Copy URL">📋</button>
       </div>
@@ -38,7 +38,9 @@
 </template>
 
 <script setup>
-defineProps({
+import { computed } from 'vue';
+
+const props = defineProps({
   serverStatus: Boolean,
   serverUrl: String,
   loading: Boolean,
@@ -47,6 +49,18 @@ defineProps({
   stopServer: Function,
   openUrl: Function,
   copyUrl: Function
+});
+
+// Computed property to display the KVM URL
+const displayUrl = computed(() => {
+  if (!props.serverUrl) return '';
+  
+  let url = props.serverUrl;
+  // Ensure the displayed URL includes /kvm
+  if (!url.endsWith('/kvm')) {
+    url = url.replace(/\/$/, '') + '/kvm';
+  }
+  return url;
 });
 </script>
 

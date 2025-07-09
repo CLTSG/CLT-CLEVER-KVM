@@ -8,9 +8,10 @@
       <button 
         v-for="(preset, key) in presetOptions"
         :key="key"
-        @click="$emit('apply-preset', key)" 
+        @click="!disabled && $emit('apply-preset', key)" 
         class="preset-button"
-        :class="{ 'active-preset': selectedPreset === key }">
+        :class="{ 'active-preset': selectedPreset === key, 'disabled': disabled }"
+        :disabled="disabled">
         {{ preset.name }}
       </button>
     </div>
@@ -21,7 +22,11 @@
 import { ref, computed } from 'vue';
 
 const props = defineProps({
-  settings: Object
+  settings: Object,
+  disabled: {
+    type: Boolean,
+    default: false
+  }
 });
 
 defineEmits(['apply-preset']);
@@ -60,6 +65,13 @@ const presetOptions = {
 
 .preset-button:hover {
   background-color: #e9ecef;
+}
+
+.preset-button.disabled,
+.preset-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .active-preset {

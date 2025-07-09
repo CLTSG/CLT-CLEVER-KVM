@@ -25,8 +25,10 @@ const {
   copyUrl
 } = useServer();
 
+// The status checking is now automatic, but we can still call it manually if needed
 onMounted(async () => {
-  await checkServerStatus();
+  // Initial check is now handled by the composable
+  // await checkServerStatus();
 });
 
 function applyPreset(presetName) {
@@ -52,14 +54,10 @@ function updateSelectedMonitor(value) {
 const tabs = computed(() => {
   const baseTabs = [
     { id: 'status', label: 'Server Status' },
+    { id: 'config', label: 'Configuration' },
     { id: 'options', label: 'Connection Options' },
     { id: 'logs', label: 'Logs' }
   ];
-
-  // Insert configuration tab when server is stopped
-  if (!serverStatus.value) {
-    baseTabs.splice(1, 0, { id: 'config', label: 'Configuration' });
-  }
 
   return baseTabs;
 });
@@ -86,13 +84,17 @@ const tabs = computed(() => {
         />
       </template>
 
-      <template #config v-if="!serverStatus">
+      <template #config>
         <div class="config-content">
           <h2>Server Configuration</h2>
+          <div v-if="serverStatus" class="config-warning">
+            <p>⚠️ Server is currently running. Stop the server to modify these settings.</p>
+          </div>
           <ServerConfiguration 
             :server-port="serverPort"
             :settings="settings"
             :monitors="monitors"
+            :disabled="serverStatus"
             @apply-preset="applyPreset"
             @update:server-port="updateServerPort"
             @update:selected-monitor="updateSelectedMonitor"
@@ -141,6 +143,20 @@ h1 {
   color: #2c3e50;
   font-size: 1.5rem;
   margin-bottom: 1.5rem;
+}
+
+.config-warning {
+  background-color: #fff3cd;
+  border: 1px solid #ffeaa7;
+  border-radius: 4px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  color: #856404;
+}
+
+.config-warning p {
+  margin: 0;
+  font-weight: 500;
 }
 
 @media (max-width: 768px) {
