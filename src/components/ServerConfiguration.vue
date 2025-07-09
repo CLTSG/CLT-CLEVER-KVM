@@ -1,5 +1,5 @@
 <template>
-  <div class="server-config">
+  <div class="server-config" :class="{ disabled: disabled }">
     <div class="form-group">
       <label for="port">Port:</label>
       <input 
@@ -8,7 +8,8 @@
         @input="$emit('update:server-port', parseInt($event.target.value))"
         type="number" 
         min="1024" 
-        max="65535" 
+        max="65535"
+        :disabled="disabled"
       />
     </div>
     
@@ -18,6 +19,7 @@
         id="monitor" 
         :value="settings.selectedMonitor"
         @change="$emit('update:selected-monitor', parseInt($event.target.value))"
+        :disabled="disabled"
       >
         <option v-for="(monitor, index) in monitors" :key="index" :value="index">
           {{ monitor.name }} {{ monitor.is_primary ? '(Primary)' : '' }} - {{ monitor.width }}x{{ monitor.height }}
@@ -27,10 +29,14 @@
     
     <PresetSelector 
       :settings="settings"
+      :disabled="disabled"
       @apply-preset="$emit('apply-preset', $event)"
     />
     
-    <AdvancedSettings :settings="settings" />
+    <AdvancedSettings 
+      :settings="settings" 
+      :disabled="disabled"
+    />
   </div>
 </template>
 
@@ -41,7 +47,11 @@ import AdvancedSettings from './AdvancedSettings.vue';
 defineProps({
   serverPort: Number,
   settings: Object,
-  monitors: Array
+  monitors: Array,
+  disabled: {
+    type: Boolean,
+    default: false
+  }
 });
 
 defineEmits(['apply-preset', 'update:server-port', 'update:selected-monitor']);
@@ -69,5 +79,15 @@ input[type="number"], select {
   border-radius: 4px;
   font-size: 1rem;
   min-width: 200px;
+}
+
+.server-config.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+input:disabled, select:disabled {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
 }
 </style>

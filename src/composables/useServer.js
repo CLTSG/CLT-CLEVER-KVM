@@ -1,4 +1,4 @@
-import { ref, reactive, computed } from "vue";
+import { ref, reactive, computed, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/tauri";
 
 export function useServer() {
@@ -9,6 +9,16 @@ export function useServer() {
   const errorMessage = ref("");
   const monitors = ref([]);
   const loadingMonitors = ref(false);
+
+  // Status check interval
+  let statusCheckInterval = null;
+
+  // Clean up interval on unmount
+  onUnmounted(() => {
+    if (statusCheckInterval) {
+      clearInterval(statusCheckInterval);
+    }
+  });
 
   // Server settings
   const settings = reactive({
@@ -51,13 +61,49 @@ export function useServer() {
 
   async function checkServerStatus() {
     try {
-      serverStatus.value = await invoke("get_server_status");
-      if (serverStatus.value) {
-        serverUrl.value = await invoke("get_server_url");
+      const status = await invoke("get_server_status");
+      serverStatus.value = status;
+      
+      if (status) {
+        try {
+          const url = await invoke("get_server_url");
+          serverUrl.value = url;
+        } catch (urlError) {
+          console.warn("Failed to get server URL:", urlError);
+          // If we can get status but not URL, something might be wrong
+          serverStatus.value = false;
+          serverUrl.value = "";
+        }
+      } else {
+        serverUrl.value = "";
       }
+      
       await loadMonitors();
     } catch (error) {
-      errorMessage.value = error;
+      console.error("Failed to check server status:", error);
+      errorMessage.value = `Failed to check server status: ${error}`;
+      serverStatus.value = false;
+      serverUrl.value = "";
+    }
+  }
+
+  // Start periodic status checking
+  function startStatusMonitoring() {
+    if (statusCheckInterval) {
+      clearInterval(statusCheckInterval);
+    }
+    
+    // Check status every 5 seconds
+    statusCheckInterval = setInterval(async () => {
+      await checkServerStatus();
+    }, 5000);
+  }
+
+  // Stop periodic status checking
+  function stopStatusMonitoring() {
+    if (statusCheckInterval) {
+      clearInterval(statusCheckInterval);
+      statusCheckInterval = null;
     }
   }
 
@@ -68,7 +114,7 @@ export function useServer() {
     try {
       const codec = selectedCodec.value;
       
-      serverUrl.value = await invoke("start_server", { 
+      const url = await invoke("start_server", { 
         port: serverPort.value,
         options: {
           deltaEncoding: settings.deltaEncoding,
@@ -85,9 +131,20 @@ export function useServer() {
           framerate: settings.framerate
         }
       });
+      
+      serverUrl.value = url;
       serverStatus.value = true;
+      
+      // Double-check the server status after starting
+      setTimeout(async () => {
+        await checkServerStatus();
+      }, 1000);
+      
     } catch (error) {
-      errorMessage.value = error;
+      console.error("Failed to start server:", error);
+      errorMessage.value = `Failed to start server: ${error}`;
+      serverStatus.value = false;
+      serverUrl.value = "";
     } finally {
       loading.value = false;
     }
@@ -101,8 +158,15 @@ export function useServer() {
       await invoke("stop_server");
       serverStatus.value = false;
       serverUrl.value = "";
+      
+      // Double-check the server status after stopping
+      setTimeout(async () => {
+        await checkServerStatus();
+      }, 1000);
+      
     } catch (error) {
-      errorMessage.value = error;
+      console.error("Failed to stop server:", error);
+      errorMessage.value = `Failed to stop server: ${error}`;
     } finally {
       loading.value = false;
     }
@@ -112,6 +176,11 @@ export function useServer() {
     if (!serverUrl.value) return "";
     
     let url = serverUrl.value;
+    // Ensure the URL ends with /kvm for the KVM client
+    if (!url.endsWith('/kvm')) {
+      url = url.replace(/\/$/, '') + '/kvm';
+    }
+    
     const params = [];
     
     if (settings.useWebRTC) {
@@ -149,6 +218,11 @@ export function useServer() {
     }
   }
 
+  // Initialize monitoring when composable is created
+  checkServerStatus().then(() => {
+    startStatusMonitoring();
+  });
+
   return {
     serverStatus,
     serverUrl,
@@ -164,6 +238,8 @@ export function useServer() {
     stopServer,
     openUrl,
     copyUrl,
-    loadMonitors
+    loadMonitors,
+    startStatusMonitoring,
+    stopStatusMonitoring
   };
 }
