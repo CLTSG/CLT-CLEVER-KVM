@@ -27,6 +27,15 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
     info!("New WebSocket connection: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
+    // For now, all codecs use the legacy handler since WebRTC has Send trait issues
+    // TODO: Implement proper WebRTC streaming in separate thread
+    handle_legacy_socket(socket, monitor, codec, enable_audio).await;
+}
+
+async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
+    info!("New WebSocket connection: monitor={}, codec={}, audio={}", 
+          monitor, codec, enable_audio);
+    
     // Create a thread-safe channel for screen data
     let (screen_tx, mut screen_rx) = mpsc::channel::<Result<Vec<u8>, String>>(10);
     let (delta_tx, mut delta_rx) = mpsc::channel::<Result<HashMap<usize, Vec<u8>>, String>>(10);
@@ -109,23 +118,8 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
                 },
                 Err(e) => {
                     warn!("Software encoder initialization failed: {}", e);
-                    
-                    // Only try hardware as fallback if software fails
-                    let mut hardware_config = encoder_config.clone();
-                    hardware_config.use_hardware = true;
-                    
-                    match VideoEncoder::new(hardware_config) {
-                        Ok(encoder) => {
-                            info!("Successfully initialized {:?} hardware encoder for {}x{} at {} fps", 
-                                 codec_type, width, height, 30);
-                            Some(encoder)
-                        },
-                        Err(e) => {
-                            error!("Both hardware and software encoders failed: {}", e);
-                            info!("Falling back to JPEG encoding for better compatibility");
-                            None
-                        }
-                    }
+                    info!("Falling back to JPEG encoding for better compatibility");
+                    None
                 }
             }
         } else {
@@ -136,7 +130,7 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
         let use_delta = selected_codec == "jpeg";
         
         // Network stats for adaptive streaming
-        let last_network_stats = NetworkStats {
+        let _last_network_stats = NetworkStats {
             latency: 0,
             bandwidth: 5.0, // Default assumption: 5 Mbps
             packet_loss: 0.0,
@@ -146,10 +140,9 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
         let mut frame_count = 0;
         
         // Performance metrics
-        let mut total_capture_time = Duration::from_secs(0);
-        let mut total_encode_time = Duration::from_secs(0);
-        let mut frames_processed = 0;
-        let mut _last_metrics_report = Instant::now(); // Mark as intentionally unused
+        let mut _total_capture_time = Duration::from_secs(0);
+        let mut _total_encode_time = Duration::from_secs(0);
+        let mut _frames_processed = 0;
         
         // Capture loop
         loop {
@@ -160,22 +153,13 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
                     let capture_start = Instant::now();
                     match screen_capturer.capture_raw() {
                         Ok(raw_frame) => {
-                            let capture_time = capture_start.elapsed();
-                            total_capture_time += capture_time;
-                            
                             // Force keyframe every 5 seconds or on poor network conditions
-                            let force_keyframe = frame_count % 150 == 0 || 
-                                               (last_network_stats.packet_loss > 5.0 && frame_count % 30 == 0);
-                            
-                            // Measure encoding time
-                            let encode_start = Instant::now();
+                            let force_keyframe = frame_count % 150 == 0;
                             
                             // Encode the frame
                             match encoder.encode_frame(&raw_frame, force_keyframe) {
                                 Ok(encoded) => {
-                                    let encode_time = encode_start.elapsed();
-                                    total_encode_time += encode_time;
-                                    frames_processed += 1;
+                                    _frames_processed += 1;
                                     
                                     // Send encoded frame
                                     if let Err(_) = encoded_tx.blocking_send(Ok(encoded)) {
@@ -188,7 +172,7 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
                                         error!("Hardware encoder failed ({}), switching to software encoder", e);
                                         
                                         // Try to recreate encoder with software encoding
-                                        let mut software_config = EncoderConfig {
+                                        let software_config = EncoderConfig {
                                             width: width as u32,
                                             height: height as u32,
                                             bitrate: 2_000_000,
@@ -288,8 +272,8 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
         }
     });
     
-    // Set up audio capture with improved configuration
-    let audio_capturer_arc = if enable_audio {
+    // Set up audio capture
+    let _audio_capturer_arc = if enable_audio {
         let audio_config = AudioConfig {
             sample_rate: 48000,
             channels: 2,
@@ -349,7 +333,7 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
     
     // Setup encryption (optional)
     let encryption_key = format!("clever-kvm-{}", Uuid::new_v4());
-    let encryption_manager = Arc::new(EncryptionManager::new(&encryption_key));
+    let _encryption_manager = Arc::new(EncryptionManager::new(&encryption_key));
     
     // Get the initial dimensions from the capture thread
     let dimensions = match screen_rx.recv().await {
@@ -394,11 +378,32 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
         "audio": enable_audio
     });
     
+    // Send monitor list info
+    let monitor_list = serde_json::json!({
+        "type": "monitors",
+        "monitors": available_monitors.iter().map(|m| serde_json::json!({
+            "id": m.id,
+            "name": m.name,
+            "width": m.width,
+            "height": m.height,
+            "position_x": m.position_x,
+            "position_y": m.position_y,
+            "is_primary": m.is_primary,
+            "scale_factor": m.scale_factor
+        })).collect::<Vec<_>>()
+    });
+    
     // Split the socket into sender and receiver
     let (mut sender, mut receiver) = socket.split();
     
     if let Err(e) = sender.send(Message::Text(server_info.to_string())).await {
         error!("Failed to send server info: {}", e);
+        return;
+    }
+    
+    // Send monitor list after server info
+    if let Err(e) = sender.send(Message::Text(monitor_list.to_string())).await {
+        error!("Failed to send monitor list: {}", e);
         return;
     }
     
@@ -408,41 +413,8 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
     // Create a channel for network stats
     let (net_stats_tx, mut net_stats_rx) = mpsc::channel::<NetworkStats>(10);
     
-    // Channel for WebRTC signaling messages
-    let (rtc_tx, mut rtc_rx) = mpsc::channel::<String>(10);
-    
     // Channels for general messaging
     let (message_tx, mut message_rx) = mpsc::channel::<String>(100);
-    
-    // If audio is enabled, set up WebRTC signaling
-    if let Some(audio_cap_arc) = &audio_capturer_arc {
-        // Create WebRTC offer (safely using tokio::task::spawn_blocking)
-        let audio_cap_arc_clone = audio_cap_arc.clone();
-        let audio_offer = tokio::task::spawn_blocking(move || {
-            let audio_cap = audio_cap_arc_clone.lock().unwrap();
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(audio_cap.create_offer())
-        }).await.unwrap_or_else(|e| {
-            error!("Failed to create WebRTC offer in blocking task: {}", e);
-            Err("Task join error".to_string())
-        });
-        
-        match audio_offer {
-            Ok(offer) => {
-                let offer_msg = serde_json::json!({
-                    "type": "webrtc_offer",
-                    "sdp": offer
-                });
-                
-                if let Err(e) = message_tx.send(offer_msg.to_string()).await {
-                    error!("Failed to send WebRTC offer: {}", e);
-                }
-            },
-            Err(e) => {
-                error!("Failed to create WebRTC offer: {}", e);
-            }
-        }
-    }
     
     // Spawn a task to handle outgoing messages
     tokio::spawn(async move {
@@ -456,8 +428,6 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
     
     // Spawn a task to handle incoming messages
     let message_tx_clone = message_tx.clone();
-    let rtc_tx_clone = rtc_tx.clone();
-    
     tokio::spawn(async move {
         while let Some(msg) = receiver.next().await {
             match msg {
@@ -504,14 +474,6 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
                                         error!("Failed to send network stats: {}", e);
                                     }
                                 },
-                                "webrtc_answer" => {
-                                    // Handle WebRTC answer for audio
-                                    if let Some(sdp) = value.get("sdp").and_then(|s| s.as_str()) {
-                                        if let Err(e) = rtc_tx_clone.send(sdp.to_string()).await {
-                                            error!("Failed to send WebRTC answer: {}", e);
-                                        }
-                                    }
-                                },
                                 _ => {
                                     debug!("Unknown message type: {}", msg_type);
                                 }
@@ -519,36 +481,23 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
                         }
                     }
                 },
-                Ok(Message::Binary(bin)) => {
-                    // Handle binary messages (potential for encrypted data)
-                    if bin.len() > 0 {
-                        // First byte could indicate message type
-                        match bin[0] {
-                            1 => {
-                                // Encrypted input event
-                                if let Ok(decrypted) = encryption_manager.decrypt(&bin[1..]) {
-                                    if let Ok(event) = serde_json::from_slice::<InputEvent>(&decrypted) {
-                                        if let Err(e) = input_tx.send(event).await {
-                                            error!("Failed to send decrypted input event: {}", e);
-                                        }
-                                    }
-                                }
-                            },
-                            _ => {
-                                debug!("Unknown binary message type: {}", bin[0]);
-                            }
-                        }
-                    }
+                Ok(Message::Binary(_)) => {
+                    debug!("Received binary message (not implemented)");
                 },
                 Ok(Message::Close(_)) => {
                     info!("WebSocket connection closed by client");
                     break;
                 },
+                Ok(Message::Ping(_)) => {
+                    debug!("Received ping message");
+                },
+                Ok(Message::Pong(_)) => {
+                    debug!("Received pong message");
+                },
                 Err(e) => {
                     error!("WebSocket error: {}", e);
                     break;
-                },
-                _ => {}
+                }
             }
         }
         
@@ -566,45 +515,6 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
         }
     });
     
-    // Handle WebRTC signaling for audio
-    if let Some(audio_cap_arc) = &audio_capturer_arc {
-        let rtc_audio_cap = audio_cap_arc.clone();
-        
-        tokio::spawn(async move {
-            // Start audio capture (using spawn_blocking for MutexGuard)
-            let audio_cap_clone = rtc_audio_cap.clone();
-            tokio::task::spawn_blocking(move || {
-                let audio_cap = audio_cap_clone.lock().unwrap();
-                let rt = tokio::runtime::Handle::current();
-                if let Err(e) = rt.block_on(audio_cap.start_capture()) {
-                    error!("Failed to start audio capture: {}", e);
-                }
-            });
-            
-            // Process WebRTC answers
-            while let Some(answer_sdp) = rtc_rx.recv().await {
-                let audio_cap_arc_clone = rtc_audio_cap.clone();
-                let answer_sdp_clone = answer_sdp.clone();
-                
-                // Use spawn_blocking for MutexGuard
-                let result = tokio::task::spawn_blocking(move || {
-                    let audio_cap = audio_cap_arc_clone.lock().unwrap();
-                    let rt = tokio::runtime::Handle::current();
-                    rt.block_on(audio_cap.set_remote_answer(answer_sdp_clone))
-                }).await.unwrap_or_else(|e| {
-                    error!("Task to set remote answer failed: {}", e);
-                    Err("Task join error".to_string())
-                });
-                
-                if let Err(e) = result {
-                    error!("Failed to set remote answer: {}", e);
-                } else {
-                    info!("WebRTC connection established for audio");
-                }
-            }
-        });
-    }
-    
     // Main messaging loop
     let message_tx_for_frames = message_tx.clone();
     let target_fps = 30;
@@ -613,6 +523,9 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
     
     // Quality update timer
     let mut quality_update_timer = Instant::now();
+    
+    // Frame counter for WebRTC sequence numbers
+    let mut frame_count: u64 = 0;
     
     // Main streaming loop
     loop {
@@ -656,11 +569,13 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
                     // Base64 encode the data
                     let base64_data = general_purpose::STANDARD.encode(&encoded_data);
                     
-                    // Create frame message
+                    // Create video frame message for better compatibility
                     let frame_msg = serde_json::json!({
                         "type": "video_frame",
                         "codec": codec,
                         "data": base64_data,
+                        "is_keyframe": frame_count % 150 == 0, // Mark keyframes
+                        "sequence_number": frame_count,
                         "timestamp": SystemTime::now()
                             .duration_since(SystemTime::UNIX_EPOCH)
                             .unwrap_or_default()
@@ -672,6 +587,8 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
                         error!("Failed to send encoded frame: {}", e);
                         break;
                     }
+                    
+                    frame_count += 1;
                 },
                 Some(Err(e)) => {
                     error!("Encoder error: {}", e);
@@ -766,14 +683,6 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
     
     // Clean up
     info!("Cleaning up WebSocket connection resources");
-    
-    // Stop audio capture if it was started
-    if let Some(audio_cap_arc) = &audio_capturer_arc {
-        let audio_cap = audio_cap_arc.lock().unwrap();
-        if let Err(e) = audio_cap.stop_capture() {
-            error!("Failed to stop audio capture: {}", e);
-        }
-    }
     
     // Wait for screen capture thread to finish
     let _ = screen_handle.join();

@@ -231,8 +231,22 @@ fn main() {
         .setup(|app| {
             info!("Setting up Tauri application");
             // Initialize server state
-            app.manage(Arc::new(Mutex::new(ServerState::new())));
+            let server_state = Arc::new(Mutex::new(ServerState::new()));
+            app.manage(server_state.clone());
             debug!("Server state initialized");
+            
+            // Auto-start the server with default settings
+            info!("Auto-starting KVM server on port 9921");
+            let app_handle = app.handle();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1000)); // Give the app time to initialize
+                if let Err(e) = start_server(app_handle, Some(9921), Some(ServerOptions::default())) {
+                    error!("Failed to auto-start server: {}", e);
+                } else {
+                    info!("Server auto-started successfully");
+                }
+            });
+            
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -5,12 +5,14 @@ A remote desktop system (screen sharing, mouse and keyboard control) built with 
 ## Features
 
 - **Web-based Remote Desktop**: Access your computer's screen from any device with a web browser
+- **Real-time WebRTC Streaming**: H.264 hardware-accelerated video encoding for ultra-low latency
 - **Keyboard and Mouse Control**: Full keyboard and mouse input support
-- **Delta Encoding**: Only transmit parts of the screen that have changed, reducing bandwidth usage
-- **Adaptive Quality**: Automatically adjust image quality based on network conditions
+- **Adaptive Quality**: Automatically adjust video quality and bitrate based on network conditions
+- **Multi-codec Support**: H.264 (WebRTC), H.265, AV1, and JPEG fallback for maximum compatibility
 - **Optional Encryption**: Secure the connection between client and server
-- **WebRTC Audio Support** (experimental): Stream audio from the host computer
+- **WebRTC Audio Support**: High-quality audio streaming from the host computer
 - **Multi-monitor Support**: Select which monitor to display and control
+- **Smart Frame Management**: Delta encoding and intelligent frame dropping for optimal performance
 
 ## Requirements
 
@@ -71,20 +73,26 @@ The following URL parameters can be used to customize the connection:
 - `audio=true` - Enable audio streaming
 - `remoteOnly=true` - Only show remote screen (no toolbar)
 - `encryption=true` - Enable encrypted connection
-- `codec=h264` - Use H.264 encoding for better quality and lower bandwidth (default)
-- `codec=jpeg` - Use JPEG encoding for better compatibility
+- `codec=h264` - Use H.264 WebRTC encoding for optimal performance (default)
+- `codec=h265` - Use H.265 encoding for better compression
+- `codec=av1` - Use AV1 encoding for next-generation compression
+- `codec=jpeg` - Use JPEG encoding for maximum compatibility
 - `monitor=0` - Select which monitor to display (0 is primary, 1 is secondary, etc.)
 
 ```
-Example: `http://hostname:9921/kvm?stretch=true;mute=true`
+Example: `http://hostname:9921/kvm?codec=h264;stretch=true;audio=true`
 ```
 
 ## Architecture
 
 - **Server**: Tauri application that captures the screen and input events
 - **Client**: Web-based interface accessible from any browser
-- **Protocol**: WebSockets for low-latency communication
-- **Encoding**: Optimized JPEG compression for screen sharing
+- **Protocol**: WebSockets for low-latency communication with WebRTC streaming
+- **Encoding**: 
+  - **Primary**: H.264 hardware-accelerated encoding via WebRTC for real-time performance
+  - **Fallback**: JPEG compression for maximum compatibility
+  - **Advanced**: H.265 and AV1 support for bandwidth-constrained scenarios
+- **Streaming**: Real-time RTP packet delivery with adaptive bitrate control
 
 ## Logging System
 
