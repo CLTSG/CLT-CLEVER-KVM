@@ -42,7 +42,7 @@ class KVMClient {
     }
 
     initializeElements() {
-        // Main elements - only use video element for modern codecs
+        // Main elements - only use video element for H.264/H.265/AV1
         this.videoScreen = document.getElementById('video-screen');
         this.canvasLayer = document.getElementById('canvas-layer');
         if (this.canvasLayer) {
@@ -81,9 +81,9 @@ class KVMClient {
         
         if (this.audioElement) this.audioElement.muted = this.config.mute;
         
-        // Always show video element for H.264/H.265/AV1
+        // Ensure video element is visible
         if (this.videoScreen) {
-            this.videoScreen.classList.remove('hidden');
+            this.videoScreen.style.display = 'block';
         }
     }
 
@@ -253,7 +253,7 @@ class KVMClient {
     setupInputHandlers() {
         const screenContainer = document.getElementById('screen');
         
-        // Mouse events - only use videoScreen since we removed JPEG support
+        // Mouse events - use video element for all codecs
         ['mousedown', 'mouseup', 'mousemove', 'wheel'].forEach(event => {
             if (this.videoScreen) {
                 this.videoScreen.addEventListener(event, (e) => this.handleMouseEvent(e));
@@ -280,11 +280,10 @@ class KVMClient {
     handleMouseEvent(e) {
         if (!this.connected) return;
         
-        // Always use video screen for mouse events
-        const activeScreen = this.videoScreen;
-        if (!activeScreen) return;
+        // Use video screen for mouse events
+        if (!this.videoScreen) return;
         
-        const rect = activeScreen.getBoundingClientRect();
+        const rect = this.videoScreen.getBoundingClientRect();
         const scaleX = this.screenWidth / rect.width;
         const scaleY = this.screenHeight / rect.height;
         
@@ -299,73 +298,66 @@ class KVMClient {
         
         switch(e.type) {
             case 'mousedown':
+                eventData.type = 'mousedown';
+                eventData.button = e.button === 0 ? 'left' : (e.button === 1 ? 'middle' : 'right');
+                this.sendInputEvent(eventData);
+                break;
             case 'mouseup':
-                let button = 'left';
-                if (e.button === 1) button = 'middle';
-                if (e.button === 2) button = 'right';
-                eventData.type = e.type;
-                eventData.button = button;
-                e.preventDefault();
+                eventData.type = 'mouseup';
+                eventData.button = e.button === 0 ? 'left' : (e.button === 1 ? 'middle' : 'right');
+                this.sendInputEvent(eventData);
                 break;
             case 'mousemove':
                 eventData.type = 'mousemove';
+                this.sendInputEvent(eventData);
                 break;
             case 'wheel':
+                e.preventDefault();
                 eventData.type = 'wheel';
                 eventData.delta_y = e.deltaY;
                 eventData.delta_x = e.deltaX;
-                e.preventDefault();
+                this.sendInputEvent(eventData);
                 break;
         }
-        
-        this.sendInputEvent(eventData);
     }
 
     handleKeyEvent(e, type) {
         if (!this.connected) return;
         
-        // Don't capture browser shortcuts
-        if (e.ctrlKey && (e.key === 'r' || e.key === 'F5' || e.key === 'w')) return;
-        
-        const modifiers = [];
-        if (e.ctrlKey) modifiers.push('Control');
-        if (e.altKey) modifiers.push('Alt');
-        if (e.shiftKey) modifiers.push('Shift');
-        if (e.metaKey) modifiers.push('Meta');
-        
-        const eventData = {
-            type,
-            key: e.key,
-            code: e.code,
-            modifiers
-        };
-        
-        if (type === 'keydown') {
-            eventData.repeat = e.repeat;
+        // Don't capture certain keys if settings panel is open
+        if (this.settingsPanel && this.settingsPanel.classList.contains('visible')) {
+            return;
         }
         
-        this.sendInputEvent(eventData);
-        
-        // Prevent default for most keys when focused on remote screen
-        if (document.activeElement === this.videoScreen || (this.videoScreen && this.videoScreen.contains(document.activeElement))) {
-            e.preventDefault();
+        // Let some special keys pass through
+        if (['F11', 'F12'].includes(e.key) || 
+            (e.key === 's' && (e.ctrlKey || e.metaKey))) {
+            return;
         }
-    }
-
-    handleTouchEvent(e) {
-        // Basic touch event handling - can be expanded for gestures
-        if (!this.connected) return;
         
         e.preventDefault();
         
-        const touches = e.changedTouches;
+        this.sendInputEvent({
+            type: type,
+            key: e.key,
+            keyCode: e.keyCode,
+            ctrlKey: e.ctrlKey,
+            altKey: e.altKey,
+            shiftKey: e.shiftKey,
+            metaKey: e.metaKey,
+            monitor_id: this.getActiveMonitorId()
+        });
+    }
+
+    handleTouchEvent(e) {
+        e.preventDefault();
         
-        if (touches.length === 1) {
-            const touch = touches[0];
-            const activeScreen = this.videoScreen;
-            if (!activeScreen) return;
-            
-            const rect = activeScreen.getBoundingClientRect();
+        if (!this.connected) return;
+        
+        // Handle touch events for mobile devices
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+            const rect = this.videoScreen.getBoundingClientRect();
             const scaleX = this.screenWidth / rect.width;
             const scaleY = this.screenHeight / rect.height;
             
@@ -373,25 +365,12 @@ class KVMClient {
             const y = Math.floor((touch.clientY - rect.top) * scaleY);
             
             let eventData = {
+                type: e.type,
                 x,
                 y,
+                identifier: touch.identifier,
                 monitor_id: this.getActiveMonitorId()
             };
-            
-            switch(e.type) {
-                case 'touchstart':
-                    eventData.type = 'mousedown';
-                    eventData.button = 'left';
-                    break;
-                case 'touchmove':
-                    eventData.type = 'mousemove';
-                    break;
-                case 'touchend':
-                case 'touchcancel':
-                    eventData.type = 'mouseup';
-                    eventData.button = 'left';
-                    break;
-            }
             
             this.sendInputEvent(eventData);
         }
@@ -404,50 +383,55 @@ class KVMClient {
     }
 
     getActiveMonitorId() {
-        if (this.availableMonitors.length > 0 && this.currentMonitor < this.availableMonitors.length) {
-            return this.availableMonitors[this.currentMonitor].id;
-        }
-        return null;
+        return this.availableMonitors[this.currentMonitor]?.id || 'primary';
     }
 
     // Utility methods
     sendPing() {
         if (this.connected && this.ws.readyState === WebSocket.OPEN) {
             this.lastPingTime = Date.now();
-            this.ws.send(JSON.stringify({ type: 'ping' }));
+            this.ws.send(JSON.stringify({
+                type: 'ping',
+                timestamp: this.lastPingTime
+            }));
         }
     }
 
     handlePingResponse() {
-        const pingTime = Date.now() - this.lastPingTime;
-        this.latency = pingTime;
-        const latencyElements = document.querySelectorAll('#latency');
-        latencyElements.forEach(el => el.textContent = pingTime);
-        this.sendNetworkStats();
+        if (this.lastPingTime > 0) {
+            this.latency = Date.now() - this.lastPingTime;
+            const latencyElement = document.getElementById('latency');
+            if (latencyElement) {
+                latencyElement.textContent = this.latency;
+            }
+        }
     }
 
     sendNetworkStats() {
+        const stats = {
+            latency: this.latency,
+            bandwidth: this.estimateBandwidth(),
+            packet_loss: this.estimatePacketLoss()
+        };
+        
         if (this.connected && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
                 type: 'network_stats',
-                latency: this.latency,
-                bandwidth: this.estimateBandwidth(),
-                packet_loss: this.estimatePacketLoss()
+                stats: stats
             }));
         }
     }
 
     estimateBandwidth() {
-        if (this.latency < 50) return 10.0;
-        if (this.latency < 100) return 5.0;
-        if (this.latency < 200) return 2.0;
-        return 1.0;
+        // Simple bandwidth estimation based on frame rate and quality
+        const bytesPerFrame = (this.screenWidth * this.screenHeight * this.qualityLevel) / 1000;
+        const fps = this.frameCount;
+        return (bytesPerFrame * fps * 8) / 1024; // kbps
     }
 
     estimatePacketLoss() {
-        if (this.latency > 200) return 5.0;
-        if (this.latency > 100) return 1.0;
-        return 0.0;
+        // Simplified packet loss estimation
+        return Math.max(0, (this.latency - 50) / 500);
     }
 
     showNotification(message, duration = 3000) {
@@ -456,16 +440,97 @@ class KVMClient {
         const notification = document.createElement('div');
         notification.className = 'notification';
         notification.textContent = message;
+        
         this.notificationArea.appendChild(notification);
         
         setTimeout(() => {
-            notification.classList.add('fadeout');
+            notification.classList.add('show');
+        }, 10);
+        
+        setTimeout(() => {
+            notification.classList.remove('show');
             setTimeout(() => {
                 if (notification.parentNode) {
-                    notification.remove();
+                    notification.parentNode.removeChild(notification);
                 }
             }, 300);
         }, duration);
+    }
+
+    toggleSettings() {
+        if (this.settingsPanel) {
+            if (this.settingsPanel.classList.contains('visible')) {
+                this.hideSettings();
+            } else {
+                this.showSettings();
+            }
+        }
+    }
+
+    showSettings() {
+        if (this.settingsPanel) {
+            this.settingsPanel.classList.add('visible');
+        }
+    }
+
+    hideSettings() {
+        if (this.settingsPanel) {
+            this.settingsPanel.classList.remove('visible');
+        }
+    }
+
+    updateStatsVisibility() {
+        if (this.networkStats) {
+            this.networkStats.style.display = this.showStats ? 'block' : 'none';
+        }
+    }
+
+    updateFrameStats() {
+        this.frameCount++;
+        const now = Date.now();
+        
+        if (now - this.lastFpsUpdate >= 1000) {
+            const fps = this.frameCount;
+            this.frameCount = 0;
+            this.lastFpsUpdate = now;
+            
+            const fpsElement = document.getElementById('fps');
+            if (fpsElement) {
+                fpsElement.textContent = fps;
+            }
+        }
+    }
+
+    saveSettings() {
+        // Get values from settings panel
+        if (this.settingStretch) {
+            this.config.stretch = this.settingStretch.checked;
+        }
+        if (this.settingAudio) {
+            this.config.audio = this.settingAudio.checked;
+        }
+        if (this.settingMute) {
+            this.config.mute = this.settingMute.checked;
+            if (this.audioElement) {
+                this.audioElement.muted = this.config.mute;
+            }
+        }
+        
+        // Apply stretch setting to video
+        if (this.videoScreen) {
+            if (this.config.stretch) {
+                this.videoScreen.style.width = '100%';
+                this.videoScreen.style.height = '100%';
+                this.videoScreen.style.objectFit = 'fill';
+            } else {
+                this.videoScreen.style.width = 'auto';
+                this.videoScreen.style.height = 'auto';
+                this.videoScreen.style.objectFit = 'contain';
+            }
+        }
+        
+        this.hideSettings();
+        this.showNotification('Settings saved');
     }
 
     toggleFullscreen() {
@@ -570,14 +635,25 @@ class KVMClient {
             // Set current selection
             this.monitorDropdown.value = this.currentMonitor;
         }
+        
+        // If this is the first monitor list and status is still showing, hide it
+        if (this.statusDisplay && this.statusDisplay.style.display !== 'none') {
+            setTimeout(() => {
+                if (this.statusDisplay) {
+                    this.statusDisplay.style.display = 'none';
+                }
+            }, 500);
+        }
     }
 
-    // Missing connect method
+    // Connect method
     connect() {
         this.updateStatus('Connecting', 'Establishing connection to server...', true);
         
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws?monitor=${this.currentMonitor}&codec=${this.currentCodec}${this.config.audio ? '&audio=true' : ''}`;
+        // Connect to KVM server on port 9921, not the frontend dev server port
+        const kvmServerHost = window.location.hostname + ':9921';
+        const wsUrl = `${protocol}//${kvmServerHost}/ws?monitor=${this.currentMonitor}&codec=${this.currentCodec}${this.config.audio ? '&audio=true' : ''}`;
         
         console.log('Connecting to:', wsUrl);
         
@@ -586,44 +662,12 @@ class KVMClient {
         this.ws.onopen = () => {
             this.connected = true;
             this.updateStatus('Connected', 'Connection established successfully');
-            setTimeout(() => {
-                if (this.statusDisplay) {
-                    this.statusDisplay.style.display = 'none';
-                }
-            }, 2000);
-            
             console.log('WebSocket connection established');
             
             // Start sending ping messages to measure latency
-            this.pingInterval = setInterval(() => this.sendPing(), 2000);
-            
-            this.showNotification('Connected to server');
-        };
-        
-        this.ws.onclose = () => {
-            this.connected = false;
-            this.updateStatus('Disconnected', 'Connection lost. Attempting to reconnect...', true);
-            if (this.statusDisplay) {
-                this.statusDisplay.style.display = 'block';
-            }
-            
-            console.log('WebSocket connection closed');
-            
-            // Clear ping interval
-            if (this.pingInterval) {
-                clearInterval(this.pingInterval);
-            }
-            
-            this.showNotification('Disconnected from server. Reconnecting...');
-            
-            // Try to reconnect after a delay
-            setTimeout(() => this.connect(), 3000);
-        };
-        
-        this.ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-            this.updateStatus('Connection Error', 'Failed to connect to server');
-            this.showNotification('Connection error occurred');
+            this.pingInterval = setInterval(() => {
+                this.sendPing();
+            }, 5000);
         };
         
         this.ws.onmessage = (event) => {
@@ -631,25 +675,46 @@ class KVMClient {
                 const data = JSON.parse(event.data);
                 this.handleMessage(data);
             } catch (e) {
-                console.error('Error processing message:', e);
+                console.error('Error parsing WebSocket message:', e);
             }
+        };
+        
+        this.ws.onclose = () => {
+            this.connected = false;
+            if (this.pingInterval) {
+                clearInterval(this.pingInterval);
+                this.pingInterval = null;
+            }
+            
+            this.updateStatus('Disconnected', 'Connection closed');
+            
+            // Attempt to reconnect after a delay
+            setTimeout(() => {
+                if (!this.connected) {
+                    console.log('Attempting to reconnect...');
+                    this.connect();
+                }
+            }, 3000);
+        };
+        
+        this.ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            this.updateStatus('Error', 'Connection failed');
         };
     }
 
     handleMessage(data) {
-        console.log('Received message:', data.type);
-        
         switch(data.type) {
+            case 'server_info':
+                this.handleServerInfo(data);
+                break;
             case 'video_frame':
                 this.handleVideoFrame(data);
                 break;
-            case 'info':
-                this.handleServerInfo(data);
-                break;
-            case 'ping':
+            case 'pong':
                 this.handlePingResponse();
                 break;
-            case 'quality':
+            case 'quality_update':
                 this.handleQualityUpdate(data);
                 break;
             case 'monitors':
@@ -657,6 +722,12 @@ class KVMClient {
                 break;
             case 'webrtc_offer':
                 this.handleWebRTCOffer(data);
+                break;
+            case 'streaming_stats':
+                this.handleStreamingStats(data);
+                break;
+            case 'webrtc_frame':
+                this.handleWebRTCFrame(data);
                 break;
             default:
                 console.log('Unknown message type:', data.type);
@@ -671,7 +742,7 @@ class KVMClient {
         
         // Update UI
         if (this.osdTitle) {
-            this.osdTitle.textContent = `${data.hostname} - ${data.monitor} (${data.width}x${data.height})`;
+            this.osdTitle.textContent = `${data.hostname} - Monitor ${data.monitor} (${data.width}x${data.height})`;
         }
         
         this.currentCodec = data.codec || this.config.codec;
@@ -685,9 +756,9 @@ class KVMClient {
             this.canvasLayer.height = this.screenHeight;
         }
         
-        // Always use video element for modern codecs
+        // Ensure video element is visible
         if (this.videoScreen) {
-            this.videoScreen.classList.remove('hidden');
+            this.videoScreen.style.display = 'block';
         }
         
         // Initialize video for codec streaming
@@ -698,7 +769,14 @@ class KVMClient {
             this.setupWebRTC(data.encryption);
         }
         
-        this.showNotification(`Connected to ${data.hostname} - ${data.monitor} (${data.width}x${data.height}) using ${data.codec}`);
+        // Hide loading status after successful connection
+        setTimeout(() => {
+            if (this.statusDisplay) {
+                this.statusDisplay.style.display = 'none';
+            }
+        }, 1000);
+        
+        this.showNotification(`Connected to ${data.hostname} - ${data.width}x${data.height} using ${data.codec}`);
     }
 
     initializeVideoStreaming() {
@@ -731,6 +809,8 @@ class KVMClient {
     }
 
     initializeMediaSource(codec) {
+        console.log('Initializing MediaSource for codec:', codec);
+        
         if (!window.MediaSource) {
             console.warn('MediaSource API not supported, using blob URL fallback');
             this.mediaSource = null;
@@ -739,15 +819,22 @@ class KVMClient {
         }
         
         const codecString = this.getCodecString(codec);
-        const mimeType = `video/mp4; codecs="${codecString}"`;
+        let mimeType = `video/mp4; codecs="${codecString}"`;
         
         console.log('Trying to initialize MediaSource with MIME type:', mimeType);
         
         if (!MediaSource.isTypeSupported(mimeType)) {
-            console.warn(`MediaSource does not support ${mimeType}, using blob URL fallback`);
-            this.mediaSource = null;
-            this.sourceBuffer = null;
-            return;
+            console.warn(`MediaSource does not support ${mimeType}, trying alternative codec`);
+            // Try with a more basic codec string
+            const fallbackMimeType = 'video/mp4; codecs="avc1.42E01E"';
+            if (!MediaSource.isTypeSupported(fallbackMimeType)) {
+                console.warn('No supported codecs found, using blob URL fallback');
+                this.mediaSource = null;
+                this.sourceBuffer = null;
+                return;
+            }
+            console.log('Using fallback MIME type:', fallbackMimeType);
+            mimeType = fallbackMimeType;
         }
         
         // Clean up existing MediaSource
@@ -774,7 +861,7 @@ class KVMClient {
         
         // Set up MediaSource event handlers
         this.mediaSource.addEventListener('sourceopen', () => {
-            console.log('MediaSource opened, adding SourceBuffer');
+            console.log('MediaSource opened, adding SourceBuffer with MIME type:', mimeType);
             try {
                 if (this.mediaSource.readyState === 'open') {
                     this.sourceBuffer = this.mediaSource.addSourceBuffer(mimeType);
@@ -783,25 +870,8 @@ class KVMClient {
                     // Set up SourceBuffer event handlers
                     this.sourceBuffer.addEventListener('updateend', () => {
                         // Process queued video data
-                        if (this.videoQueue.length > 0 && !this.sourceBuffer.updating && this.sourceBuffer.buffered.length > 0) {
+                        if (this.videoQueue.length > 0 && !this.sourceBuffer.updating) {
                             try {
-                                // Remove old data to prevent buffer overflow
-                                const buffered = this.sourceBuffer.buffered;
-                                if (buffered.length > 0) {
-                                    const currentTime = this.videoScreen.currentTime;
-                                    const bufferStart = buffered.start(0);
-                                    const bufferEnd = buffered.end(buffered.length - 1);
-                                    
-                                    // Remove data that's more than 30 seconds old
-                                    if (currentTime - bufferStart > 30) {
-                                        const removeEnd = Math.min(currentTime - 10, bufferEnd);
-                                        if (removeEnd > bufferStart) {
-                                            this.sourceBuffer.remove(bufferStart, removeEnd);
-                                            return; // Wait for remove to complete
-                                        }
-                                    }
-                                }
-                                
                                 // Append next queued data
                                 const nextData = this.videoQueue.shift();
                                 this.sourceBuffer.appendBuffer(nextData);
@@ -819,27 +889,12 @@ class KVMClient {
                         this.switchToBlobFallback();
                     });
                     
-                    this.sourceBuffer.addEventListener('abort', (e) => {
-                        console.warn('SourceBuffer abort:', e);
-                    });
-                    
-                    console.log('MediaSource initialized successfully for', codec);
-                } else {
-                    console.error('MediaSource is not in open state:', this.mediaSource.readyState);
+                    console.log('MediaSource and SourceBuffer initialized successfully');
                 }
             } catch (e) {
-                console.error('Error setting up SourceBuffer:', e);
+                console.error('Error setting up MediaSource:', e);
                 this.switchToBlobFallback();
             }
-        });
-        
-        this.mediaSource.addEventListener('sourceended', () => {
-            console.log('MediaSource ended');
-        });
-        
-        this.mediaSource.addEventListener('sourceclose', () => {
-            console.log('MediaSource closed');
-            this.sourceBuffer = null;
         });
         
         this.mediaSource.addEventListener('error', (e) => {
@@ -849,7 +904,7 @@ class KVMClient {
     }
 
     switchToBlobFallback() {
-        console.warn('Switching to blob URL fallback for video playback');
+        console.log('Switching to blob URL fallback');
         this.mediaSource = null;
         this.sourceBuffer = null;
         this.videoQueue = [];
@@ -869,35 +924,29 @@ class KVMClient {
             
             // Check if we have a valid MediaSource setup
             if (this.mediaSource && this.sourceBuffer && this.mediaSource.readyState === 'open') {
+                console.log('Using MediaSource to play video frame');
                 if (this.sourceBuffer.updating) {
                     // Queue the data if source buffer is busy
                     this.videoQueue.push(videoData);
                     // Limit queue size to prevent memory issues
-                    if (this.videoQueue.length > 50) {
+                    if (this.videoQueue.length > 10) {
                         console.warn('Video queue getting large, dropping oldest frames');
                         this.videoQueue.shift();
                     }
                 } else {
                     try {
-                        // Check if buffer is getting too full
-                        const buffered = this.sourceBuffer.buffered;
-                        if (buffered.length > 0) {
-                            const bufferEnd = buffered.end(buffered.length - 1);
-                            const currentTime = this.videoScreen.currentTime;
-                            
-                            // If buffer is more than 10 seconds ahead, skip this frame
-                            if (bufferEnd - currentTime > 10) {
-                                console.warn('Buffer too full, skipping frame');
-                                return;
-                            }
-                        }
-                        
                         this.sourceBuffer.appendBuffer(videoData);
                         
                         // Auto-play if video is paused (for initial frame)
                         if (this.videoScreen.paused && this.videoScreen.readyState >= 2) {
+                            console.log('Starting video playback');
                             this.videoScreen.play().catch(e => {
                                 console.warn('Auto-play failed:', e);
+                                // Try to enable autoplay with user interaction
+                                document.addEventListener('click', () => {
+                                    console.log('Playing video after user interaction');
+                                    this.videoScreen.play().catch(console.error);
+                                }, { once: true });
                             });
                         }
                         
@@ -910,19 +959,20 @@ class KVMClient {
                 }
             } else {
                 // Use blob URL fallback
-                console.log('Using blob URL fallback');
+                console.log('Using blob URL fallback for video frame');
                 this.playVideoWithBlob(videoData, data.codec);
             }
             
             this.updateFrameStats();
+            
         } catch (e) {
             console.error('Error handling video frame:', e);
         }
     }
 
     playVideoWithBlob(videoData, codec) {
-        // For blob fallback, we need to create a proper MP4 container
-        // This is a simplified approach - in reality, you'd need to create proper MP4 headers
+        // For blob fallback, create a basic data URL
+        console.log('Playing video with blob fallback');
         
         const codecString = this.getCodecString(codec);
         const mimeType = `video/mp4; codecs="${codecString}"`;
@@ -936,118 +986,65 @@ class KVMClient {
             URL.revokeObjectURL(this.videoScreen.src);
         }
         
-        // For better compatibility, we'll use a different approach
-        // Create a new video element for each frame (less efficient but more reliable)
-        const tempVideo = document.createElement('video');
-        tempVideo.src = url;
-        tempVideo.autoplay = true;
-        tempVideo.muted = true;
-        tempVideo.playsInline = true;
+        this.videoScreen.src = url;
+        this.videoScreen.play().catch(e => {
+            console.warn('Blob video play failed:', e);
+        });
         
-        tempVideo.onloadeddata = () => {
-            // Copy the frame to canvas and then to main video
-            if (this.canvasLayer) {
-                const canvas = this.canvasLayer;
-                const ctx = this.ctx;
-                
-                canvas.width = this.screenWidth;
-                canvas.height = this.screenHeight;
-                
-                tempVideo.oncanplay = () => {
-                    ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
-                    
-                    // Convert canvas to blob and set as video source
-                    canvas.toBlob((canvasBlob) => {
-                        if (canvasBlob) {
-                            const canvasUrl = URL.createObjectURL(canvasBlob);
-                            
-                            // Clean up previous video URL
-                            if (this.videoScreen.src && this.videoScreen.src.startsWith('blob:')) {
-                                URL.revokeObjectURL(this.videoScreen.src);
-                            }
-                            
-                            this.videoScreen.src = canvasUrl;
-                            
-                            // Clean up temporary URLs
-                            setTimeout(() => {
-                                URL.revokeObjectURL(url);
-                                URL.revokeObjectURL(canvasUrl);
-                            }, 100);
-                        }
-                    }, 'image/jpeg', 0.9);
-                };
-            }
-        };
-        
-        tempVideo.onerror = (e) => {
-            console.error('Error with blob video:', e);
+        // Clean up URL after some time
+        setTimeout(() => {
             URL.revokeObjectURL(url);
-        };
+        }, 5000);
     }
 
+    handleWebRTCFrame(data) {
+        console.log('Received WebRTC frame');
+        
+        try {
+            // This would handle WebRTC frame data
+            // For now, just update frame statistics
+            this.updateFrameStats();
+            
+        } catch (e) {
+            console.error('Error handling WebRTC frame:', e);
+        }
+    }
+
+    handleStreamingStats(data) {
+        console.log('Streaming stats:', data);
+        
+        // Update network stats display
+        if (this.networkStats) {
+            this.networkStats.innerHTML = `
+                <div>Frames: ${data.frames_sent || 0}</div>
+                <div>Bitrate: ${data.current_bitrate_kbps || 0} kbps</div>
+                <div>Latency: ~${this.latency || 0}ms</div>
+            `;
+        }
+    }
+
+    // Utility methods
     getCodecString(codec) {
-        switch (codec) {
+        switch(codec) {
             case 'h264':
-                // Use more compatible H.264 profile
-                return 'avc1.42E01E'; // Baseline profile, level 3.0
+                return 'avc1.42E01E'; // H.264 Baseline Profile Level 3.0 (most compatible)
             case 'h265':
-                // Use compatible H.265 profile
-                return 'hev1.1.6.L93.B0'; // Main profile
+                return 'hev1.1.6.L93.B0'; // H.265 Main Profile Level 3.1
             case 'av1':
-                return 'av01.0.04M.08';
+                return 'av01.0.01M.08'; // AV1 Main Profile Level 3.0
             default:
-                return 'avc1.42E01E';
+                return 'avc1.42E01E'; // Default to H.264
         }
     }
 
     base64ToArrayBuffer(base64) {
         const binaryString = atob(base64);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
             bytes[i] = binaryString.charCodeAt(i);
         }
         return bytes.buffer;
-    }
-
-    updateFrameStats() {
-        this.frameCount++;
-        const now = Date.now();
-        
-        if (now - this.lastFpsUpdate >= 1000) {
-            const fps = Math.round(this.frameCount * 1000 / (now - this.lastFpsUpdate));
-            
-            // Update FPS display
-            const fpsElements = document.querySelectorAll('#fps');
-            fpsElements.forEach(el => el.textContent = fps);
-            
-            this.frameCount = 0;
-            this.lastFpsUpdate = now;
-        }
-    }
-
-    updateStatsVisibility() {
-        if (this.showStats && this.connected) {
-            this.networkStats.classList.add('visible');
-        } else {
-            this.networkStats.classList.remove('visible');
-        }
-    }
-
-    toggleSettings() {
-        if (this.settingsPanel.classList.contains('visible')) {
-            this.hideSettings();
-        } else {
-            this.showSettings();
-        }
-    }
-
-    showSettings() {
-        this.settingsPanel.classList.add('visible');
-        this.showOSD(); // Keep OSD visible while settings are open
-    }
-
-    hideSettings() {
-        this.settingsPanel.classList.remove('visible');
     }
 
     updateStatus(title, message, showSpinner = false) {
@@ -1059,6 +1056,9 @@ class KVMClient {
         
         if (titleEl) titleEl.textContent = title;
         if (messageEl) messageEl.textContent = message;
+        
+        // Show status display
+        this.statusDisplay.style.display = 'block';
         
         if (showSpinner) {
             if (!spinner) {

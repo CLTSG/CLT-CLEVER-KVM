@@ -1,4 +1,4 @@
-use log::{info, warn, debug};
+use log::{info, debug};
 use std::process::Command;
 
 pub struct SystemCapabilities {
