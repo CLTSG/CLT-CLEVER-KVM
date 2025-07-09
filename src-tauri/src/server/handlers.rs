@@ -6,8 +6,9 @@ use axum::{
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use tokio::sync::broadcast;
 
-use super::websocket::handle_socket_wrapper;
+use super::websocket::{handle_socket_wrapper, handle_socket_wrapper_with_stop};
 
 pub async fn kvm_client_handler(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
     // Parse the query parameters
@@ -108,4 +109,18 @@ pub async fn ws_handler(ws: WebSocketUpgrade, Query(params): Query<HashMap<Strin
     
     // Pass connection parameters to the WebSocket handler - use 'move' to take ownership
     ws.on_upgrade(move |socket| handle_socket_wrapper(socket, monitor, codec, audio))
+}
+
+pub async fn ws_handler_with_stop(
+    ws: WebSocketUpgrade, 
+    Query(params): Query<HashMap<String, String>>,
+    stop_rx: broadcast::Receiver<()>
+) -> impl IntoResponse {
+    // Extract monitor parameter
+    let monitor = params.get("monitor").map(|v| v.parse::<usize>().unwrap_or(0)).unwrap_or(0);
+    let codec = params.get("codec").map(|v| v.to_string()).unwrap_or_else(|| "h264".to_string());
+    let audio = params.get("audio").map(|v| v == "true").unwrap_or(false);
+    
+    // Pass connection parameters to the WebSocket handler with stop signal
+    ws.on_upgrade(move |socket| handle_socket_wrapper_with_stop(socket, monitor, codec, audio, stop_rx))
 }
