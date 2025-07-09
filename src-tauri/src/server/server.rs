@@ -5,7 +5,7 @@ use axum::{
 };
 use std::net::SocketAddr;
 use tokio::{
-    sync::mpsc,
+    sync::{mpsc, broadcast},
     task::JoinHandle,
     net::TcpListener
 };
@@ -16,11 +16,13 @@ use std::convert::Infallible;
 use axum::http::{StatusCode, Response};
 use axum::body::Body;
 
-use super::handlers::{ws_handler, kvm_client_handler, static_file_handler};
+use super::handlers::{kvm_client_handler, static_file_handler, ws_handler_with_stop};
 
 pub struct WebSocketServer {
     shutdown_tx: mpsc::Sender<()>,
     server_handle: JoinHandle<()>,
+    // Add broadcast channel for signaling all connections to stop
+    stop_broadcast: broadcast::Sender<()>,
 }
 
 // Define a simple function that returns a 404 response
@@ -36,9 +38,16 @@ impl WebSocketServer {
         // Channel for shutdown signal
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
         
+        // Broadcast channel for stopping all connections
+        let (stop_broadcast, _) = broadcast::channel::<()>(10);
+        let stop_broadcast_clone = stop_broadcast.clone();
+        
         // Set up the router
         let app = Router::new()
-            .route("/ws", get(ws_handler))
+            .route("/ws", get(move |ws: axum::extract::ws::WebSocketUpgrade, query: axum::extract::Query<std::collections::HashMap<String, String>>| {
+                let stop_rx = stop_broadcast_clone.subscribe();
+                async move { ws_handler_with_stop(ws, query, stop_rx).await }
+            }))
             .route("/kvm", get(kvm_client_handler))
             .route("/static/*path", get(static_file_handler))
             .fallback_service(
@@ -75,10 +84,17 @@ impl WebSocketServer {
         Ok(WebSocketServer {
             shutdown_tx,
             server_handle,
+            stop_broadcast,
         })
     }
 
     pub async fn shutdown(self) {
+        // Signal all connections to stop
+        let _ = self.stop_broadcast.send(());
+        
+        // Give connections a moment to clean up
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        
         // Send shutdown signal
         if let Err(e) = self.shutdown_tx.send(()).await {
             log::error!("Failed to send shutdown signal: {}", e);

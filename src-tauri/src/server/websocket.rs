@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::{
-    sync::mpsc,
+    sync::{mpsc, broadcast},
     time,
 };
 use uuid::Uuid;
@@ -21,6 +21,17 @@ use super::models::NetworkStats;
 // Helper function to make the future Send
 pub async fn handle_socket_wrapper(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
     handle_socket(socket, monitor, codec, enable_audio).await;
+}
+
+// New helper function with stop signal
+pub async fn handle_socket_wrapper_with_stop(
+    socket: WebSocket, 
+    monitor: usize, 
+    codec: String, 
+    enable_audio: bool, 
+    stop_rx: broadcast::Receiver<()>
+) {
+    handle_socket_with_stop(socket, monitor, codec, enable_audio, stop_rx).await;
 }
 
 pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
@@ -686,4 +697,449 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
     
     // Wait for screen capture thread to finish
     let _ = screen_handle.join();
+}
+
+// New handler with stop signal
+pub async fn handle_socket_with_stop(
+    socket: WebSocket, 
+    monitor: usize, 
+    codec: String, 
+    enable_audio: bool, 
+    mut stop_rx: broadcast::Receiver<()>
+) {
+    info!("New WebSocket connection with stop signal: monitor={}, codec={}, audio={}", 
+          monitor, codec, enable_audio);
+    
+    // For now, all codecs use the legacy handler since WebRTC has Send trait issues
+    // TODO: Implement proper WebRTC streaming in separate thread
+    handle_legacy_socket_with_stop(socket, monitor, codec, enable_audio, stop_rx).await;
+}
+
+async fn handle_legacy_socket_with_stop(
+    socket: WebSocket, 
+    monitor: usize, 
+    codec: String, 
+    enable_audio: bool, 
+    stop_rx: broadcast::Receiver<()>
+) {
+    info!("New WebSocket connection: monitor={}, codec={}, audio={}", 
+          monitor, codec, enable_audio);
+    
+    // Create a thread-safe channel for screen data
+    let (screen_tx, mut screen_rx) = mpsc::channel::<Result<Vec<u8>, String>>(10);
+    let (delta_tx, mut delta_rx) = mpsc::channel::<Result<HashMap<usize, Vec<u8>>, String>>(10);
+    let (encoded_tx, mut encoded_rx) = mpsc::channel::<Result<Vec<u8>, String>>(10);
+    
+    // Create a stop signal for the screen capture thread
+    let (thread_stop_tx, mut thread_stop_rx) = mpsc::channel::<()>(1);
+    
+    // Initialize monitors
+    let available_monitors = match ScreenCapture::get_all_monitors() {
+        Ok(monitors) => {
+            info!("Found {} monitors", monitors.len());
+            for (i, m) in monitors.iter().enumerate() {
+                info!("Monitor {}: {} - {}x{} at ({},{}) Primary: {} Scale: {}",
+                     i, m.name, m.width, m.height, m.position_x, m.position_y, 
+                     m.is_primary, m.scale_factor);
+            }
+            monitors
+        },
+        Err(e) => {
+            error!("Failed to get monitor info: {}", e);
+            Vec::new()
+        }
+    };
+    
+    // Choose the appropriate monitor
+    let monitor_index = if monitor < available_monitors.len() {
+        monitor
+    } else {
+        warn!("Requested monitor {} not available, falling back to primary", monitor);
+        // Find primary monitor or default to 0
+        available_monitors.iter().position(|m| m.is_primary).unwrap_or(0)
+    };
+    
+    // Setup screen capture in a separate thread with stop signal
+    let selected_codec = codec.clone();
+    let screen_handle = std::thread::spawn(move || {
+        // Initialize screen capture for the selected monitor
+        let mut screen_capturer = match ScreenCapture::new(Some(monitor_index)) {
+            Ok(capturer) => capturer,
+            Err(e) => {
+                let err_msg = format!("Failed to initialize screen capture: {}", e);
+                let _ = screen_tx.blocking_send(Err(err_msg.clone()));
+                let _ = encoded_tx.blocking_send(Err(err_msg));
+                return;
+            }
+        };
+        
+        // Get screen dimensions for initial info
+        let (width, height) = screen_capturer.dimensions();
+        let (tile_width, tile_height, tile_size) = screen_capturer.tile_dimensions();
+        
+        // Send the dimensions
+        let dimensions = (width, height, tile_width, tile_height, tile_size);
+        let _ = screen_tx.blocking_send(Ok(bincode::serialize(&dimensions).unwrap_or_default()));
+        
+        // Default quality
+        let current_quality = super::models::DEFAULT_QUALITY;
+        
+        // Convert codec string to enum
+        let codec_type = CodecType::from_string(&selected_codec);
+        
+        // Initialize codec encoder if using H.264/H.265/AV1
+        let mut video_encoder: Option<VideoEncoder> = if selected_codec != "jpeg" {
+            // Create encoder configuration - default to software encoding
+            let encoder_config = EncoderConfig {
+                width: width as u32,
+                height: height as u32,
+                bitrate: 2_000_000, // 2 Mbps default
+                framerate: 30,
+                keyframe_interval: 60, // Every 2 seconds at 30fps
+                preset: "ultrafast".to_string(), // This will be used for software encoders
+                use_hardware: false, // Default to software encoding
+                codec_type,
+            };
+            
+            // Try software encoder first
+            match VideoEncoder::new(encoder_config.clone()) {
+                Ok(encoder) => {
+                    info!("Successfully initialized {:?} software encoder for {}x{} at {} fps", 
+                         codec_type, width, height, 30);
+                    Some(encoder)
+                },
+                Err(e) => {
+                    warn!("Software encoder initialization failed: {}", e);
+                    info!("Falling back to JPEG encoding for better compatibility");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        
+        // Use delta encoding by default for JPEG mode
+        let use_delta = selected_codec == "jpeg";
+        
+        // Frame counter for keyframes
+        let mut frame_count = 0u64;
+        let mut _frames_processed = 0u64;
+        
+        // Main capture loop with stop signal check
+        loop {
+            // Check for stop signal (non-blocking)
+            if thread_stop_rx.try_recv().is_ok() {
+                info!("Screen capture thread received stop signal, exiting");
+                break;
+            }
+            
+            frame_count += 1;
+            
+            if use_delta {
+                // Delta-encoded JPEG capture for legacy clients
+                match screen_capturer.capture_jpeg_delta(Some(current_quality)) {
+                    Ok(tiles) => {
+                        if let Err(_) = delta_tx.blocking_send(Ok(tiles)) {
+                            break;
+                        }
+                    },
+                    Err(e) => {
+                        let err_msg = format!("Failed to capture delta: {}", e);
+                        let _ = delta_tx.blocking_send(Err(err_msg));
+                        break;
+                    }
+                }
+            } else if let Some(encoder) = &mut video_encoder {
+                // H.264/H.265/AV1 encoding
+                let _capture_start = Instant::now();
+                match screen_capturer.capture_raw() {
+                    Ok(raw_frame) => {
+                        // Force keyframe every 5 seconds or on poor network conditions
+                        let force_keyframe = frame_count % 150 == 0;
+                        
+                        // Encode the frame
+                        match encoder.encode_frame(&raw_frame, force_keyframe) {
+                            Ok(encoded) => {
+                                _frames_processed += 1;
+                                
+                                // Send encoded frame
+                                if let Err(_) = encoded_tx.blocking_send(Ok(encoded)) {
+                                    break;
+                                }
+                            },
+                            Err(e) => {
+                                // Check if this is a hardware encoder issue
+                                if e.to_string().contains("Hardware encoder failed to open") {
+                                    error!("Hardware encoder failed ({}), switching to software encoder", e);
+                                    
+                                    // Try to recreate encoder with software encoding
+                                    let software_config = EncoderConfig {
+                                        width: width as u32,
+                                        height: height as u32,
+                                        bitrate: 2_000_000,
+                                        framerate: 30,
+                                        keyframe_interval: 60,
+                                        preset: "ultrafast".to_string(),
+                                        use_hardware: false, // Force software
+                                        codec_type,
+                                    };
+                                    
+                                    match VideoEncoder::new(software_config) {
+                                        Ok(new_encoder) => {
+                                            info!("Successfully switched to software encoder");
+                                            *encoder = new_encoder;
+                                            // Try encoding again with the new software encoder
+                                            continue;
+                                        },
+                                        Err(e) => {
+                                            error!("Software encoder also failed: {}, falling back to JPEG", e);
+                                            // Clear the encoder to force JPEG fallback
+                                            video_encoder = None;
+                                            break;
+                                        }
+                                    }
+                                } else {
+                                    warn!("Encoding failed: {}", e);
+                                    // Sleep and continue for temporary errors
+                                    std::thread::sleep(Duration::from_millis(16));
+                                    continue;
+                                }
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        warn!("Failed to capture raw frame: {}", e);
+                        std::thread::sleep(Duration::from_millis(100));
+                        continue;
+                    }
+                }
+            } else {
+                // Basic JPEG encoding
+                match screen_capturer.capture_jpeg(current_quality) {
+                    Ok(jpeg_data) => {
+                        if let Err(_) = screen_tx.blocking_send(Ok(jpeg_data)) {
+                            break;
+                        }
+                    },
+                    Err(e) => {
+                        let err_msg = format!("Failed to capture jpeg: {}", e);
+                        let _ = screen_tx.blocking_send(Err(err_msg));
+                        break;
+                    }
+                }
+            }
+            
+            // Sleep to maintain target frame rate
+            std::thread::sleep(Duration::from_millis(1000 / 30));
+        }
+        
+        info!("Screen capture thread exiting");
+    });
+    
+    // Continue with the rest of the function similar to handle_legacy_socket
+    // but with proper cleanup handling...
+    
+    // Set up WebSocket communication and task spawning
+    let (mut sender, mut receiver) = socket.split();
+    let (message_tx, mut message_rx) = mpsc::channel::<String>(100);
+    let (input_tx, mut input_rx) = mpsc::channel::<InputEvent>(100);
+    
+    // Initialize input handler
+    let input_handler = Arc::new(Mutex::new(InputHandler::new()));
+    
+    // Create multiple receivers for the stop signal
+    let mut stop_rx1 = stop_rx.resubscribe();
+    let mut stop_rx2 = stop_rx.resubscribe();
+    let mut stop_rx3 = stop_rx.resubscribe();
+    
+    // Spawn task to handle client messages with stop signal
+    let input_tx_for_messages = input_tx.clone();
+    let client_handler = tokio::spawn(async move {
+        while let Some(msg_result) = receiver.next().await {
+            // Check for stop signal
+            if stop_rx1.try_recv().is_ok() {
+                info!("WebSocket handler received stop signal, closing connection");
+                break;
+            }
+            
+            match msg_result {
+                Ok(Message::Text(text)) => {
+                    // Handle text messages (input events, etc.)
+                    match serde_json::from_str::<InputEvent>(&text) {
+                        Ok(event) => {
+                            if let Err(e) = input_tx_for_messages.send(event).await {
+                                error!("Failed to send input event: {}", e);
+                                break;
+                            }
+                        },
+                        Err(e) => {
+                            debug!("Failed to parse input event: {} - text: {}", e, text);
+                        }
+                    }
+                },
+                Ok(Message::Binary(_)) => {
+                    debug!("Received binary message (not implemented)");
+                },
+                Ok(Message::Close(_)) => {
+                    info!("WebSocket connection closed by client");
+                    break;
+                },
+                Ok(Message::Ping(_)) => {
+                    debug!("Received ping message");
+                },
+                Ok(Message::Pong(_)) => {
+                    debug!("Received pong message");
+                },
+                Err(e) => {
+                    error!("WebSocket error: {}", e);
+                    break;
+                }
+            }
+        }
+        
+        info!("Client disconnected");
+    });
+    
+    // Process input events
+    let input_handler_for_events = input_handler.clone();
+    tokio::spawn(async move {
+        while let Some(event) = input_rx.recv().await {
+            let mut handler = input_handler_for_events.lock().unwrap();
+            if let Err(e) = handler.handle_event(event) {
+                error!("Failed to handle input event: {}", e);
+            }
+        }
+    });
+    
+    // Main messaging loop
+    let message_tx_for_frames = message_tx.clone();
+    
+    // Handle different frame types based on codec
+    tokio::spawn(async move {
+        let mut last_frame_time = Instant::now();
+        let target_frame_interval = Duration::from_millis(1000 / 30); // 30 FPS
+        
+        loop {
+            tokio::select! {
+                // Check for stop signal
+                _ = stop_rx2.recv() => {
+                    info!("Frame handler received stop signal, stopping");
+                    break;
+                }
+                
+                // Handle encoded frames (H.264/H.265/AV1)
+                result = encoded_rx.recv() => {
+                    match result {
+                        Some(Ok(frame_data)) => {
+                            let now = Instant::now();
+                            if now.duration_since(last_frame_time) >= target_frame_interval {
+                                let frame_b64 = general_purpose::STANDARD.encode(&frame_data);
+                                let message = serde_json::json!({
+                                    "type": "encoded_frame",
+                                    "data": frame_b64,
+                                    "timestamp": SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis()
+                                }).to_string();
+                                
+                                if let Err(_) = message_tx_for_frames.send(message).await {
+                                    break;
+                                }
+                                
+                                last_frame_time = now;
+                            }
+                        },
+                        Some(Err(e)) => {
+                            error!("Encoded frame error: {}", e);
+                            break;
+                        },
+                        None => break,
+                    }
+                }
+                
+                // Handle JPEG frames
+                result = screen_rx.recv() => {
+                    match result {
+                        Some(Ok(frame_data)) => {
+                            let now = Instant::now();
+                            if now.duration_since(last_frame_time) >= target_frame_interval {
+                                let frame_b64 = general_purpose::STANDARD.encode(&frame_data);
+                                let message = serde_json::json!({
+                                    "type": "frame",
+                                    "data": frame_b64,
+                                    "timestamp": SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis()
+                                }).to_string();
+                                
+                                if let Err(_) = message_tx_for_frames.send(message).await {
+                                    break;
+                                }
+                                
+                                last_frame_time = now;
+                            }
+                        },
+                        Some(Err(e)) => {
+                            error!("Frame error: {}", e);
+                            break;
+                        },
+                        None => break,
+                    }
+                }
+                
+                // Handle delta frames
+                result = delta_rx.recv() => {
+                    match result {
+                        Some(Ok(tiles)) => {
+                            let mut tile_data = HashMap::new();
+                            for (tile_idx, tile_bytes) in tiles.iter() {
+                                tile_data.insert(tile_idx.to_string(), general_purpose::STANDARD.encode(tile_bytes));
+                            }
+                            
+                            let message = serde_json::json!({
+                                "type": "delta_frame",
+                                "tiles": tile_data,
+                                "timestamp": SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis()
+                            }).to_string();
+                            
+                            if let Err(_) = message_tx_for_frames.send(message).await {
+                                break;
+                            }
+                        },
+                        Some(Err(e)) => {
+                            error!("Delta frame error: {}", e);
+                            break;
+                        },
+                        None => break,
+                    }
+                }
+            }
+        }
+    });
+    
+    // Main message sending loop
+    tokio::spawn(async move {
+        while let Some(message) = message_rx.recv().await {
+            if let Err(e) = sender.send(Message::Text(message)).await {
+                error!("Failed to send WebSocket message: {}", e);
+                break;
+            }
+        }
+    });
+    
+    // Wait for client handler to finish or stop signal
+    tokio::select! {
+        _ = client_handler => {
+            info!("Client handler finished");
+        }
+        _ = stop_rx3.recv() => {
+            info!("Received stop signal, terminating connection");
+        }
+    }
+    
+    // Send stop signal to screen capture thread
+    let _ = thread_stop_tx.send(()).await;
+    
+    // Wait for screen capture thread to finish
+    if let Err(e) = tokio::task::spawn_blocking(move || screen_handle.join()).await {
+        error!("Failed to join screen capture thread: {:?}", e);
+    }
+    
+    info!("WebSocket connection with stop signal finished cleanup");
 }
