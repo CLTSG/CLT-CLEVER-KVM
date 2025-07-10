@@ -20,6 +20,13 @@ class KVMClient {
         this.videoQueue = [];
         this.showStats = false;
         
+        // Rendering mode and canvas properties
+        this.renderingMode = 'video'; // 'video' or 'canvas'
+        this.canvas = null;
+        this.ctx = null;
+        this.playButton = null;
+        this.needsKeyframe = true;
+        
         // OSD state
         this.osdVisible = true;
         this.osdTimer = null;
@@ -379,6 +386,12 @@ class KVMClient {
     sendInputEvent(event) {
         if (this.connected && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify(event));
+        }
+    }
+
+    sendMessage(message) {
+        if (this.connected && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify(message));
         }
     }
 
@@ -812,29 +825,32 @@ class KVMClient {
         console.log('Initializing MediaSource for codec:', codec);
         
         if (!window.MediaSource) {
-            console.warn('MediaSource API not supported, using blob URL fallback');
-            this.mediaSource = null;
-            this.sourceBuffer = null;
+            console.warn('MediaSource API not supported, switching to canvas rendering');
+            this.switchToCanvasRendering();
             return;
         }
         
-        const codecString = this.getCodecString(codec);
-        let mimeType = `video/mp4; codecs="${codecString}"`;
+        // Test multiple codec configurations
+        const codecConfigs = this.getCodecConfigurations(codec);
+        let mimeType = null;
         
-        console.log('Trying to initialize MediaSource with MIME type:', mimeType);
+        console.log('Testing codec configurations:', codecConfigs);
         
-        if (!MediaSource.isTypeSupported(mimeType)) {
-            console.warn(`MediaSource does not support ${mimeType}, trying alternative codec`);
-            // Try with a more basic codec string
-            const fallbackMimeType = 'video/mp4; codecs="avc1.42E01E"';
-            if (!MediaSource.isTypeSupported(fallbackMimeType)) {
-                console.warn('No supported codecs found, using blob URL fallback');
-                this.mediaSource = null;
-                this.sourceBuffer = null;
-                return;
+        for (const config of codecConfigs) {
+            console.log(`Testing MIME type: ${config}`);
+            if (MediaSource.isTypeSupported(config)) {
+                mimeType = config;
+                console.log(`✓ Supported MIME type found: ${config}`);
+                break;
+            } else {
+                console.log(`✗ Not supported: ${config}`);
             }
-            console.log('Using fallback MIME type:', fallbackMimeType);
-            mimeType = fallbackMimeType;
+        }
+        
+        if (!mimeType) {
+            console.warn('No supported codec configurations found, switching to canvas rendering');
+            this.switchToCanvasRendering();
+            return;
         }
         
         // Clean up existing MediaSource
@@ -854,6 +870,7 @@ class KVMClient {
         this.mediaSource = new MediaSource();
         this.sourceBuffer = null;
         this.videoQueue = [];
+        this.needsKeyframe = true;
         
         // Create object URL and set it to video element
         const objectURL = URL.createObjectURL(this.mediaSource);
@@ -872,42 +889,77 @@ class KVMClient {
                         // Process queued video data
                         if (this.videoQueue.length > 0 && !this.sourceBuffer.updating) {
                             try {
-                                // Append next queued data
                                 const nextData = this.videoQueue.shift();
                                 this.sourceBuffer.appendBuffer(nextData);
                             } catch (e) {
                                 console.error('Error processing video queue:', e);
-                                // Clear queue and switch to blob fallback
                                 this.videoQueue = [];
-                                this.switchToBlobFallback();
+                                this.switchToCanvasRendering();
                             }
+                        }
+                        
+                        // Auto-play if video is ready
+                        if (this.videoScreen.paused && this.videoScreen.readyState >= 2) {
+                            console.log('Starting video playback');
+                            this.videoScreen.play().catch(e => {
+                                console.warn('Auto-play failed:', e);
+                                this.handleAutoplayFailed();
+                            });
                         }
                     });
                     
                     this.sourceBuffer.addEventListener('error', (e) => {
                         console.error('SourceBuffer error:', e);
-                        this.switchToBlobFallback();
+                        this.switchToCanvasRendering();
                     });
                     
                     console.log('MediaSource and SourceBuffer initialized successfully');
+                    
+                    // Request initial keyframe
+                    this.requestKeyframe();
                 }
             } catch (e) {
                 console.error('Error setting up MediaSource:', e);
-                this.switchToBlobFallback();
+                this.switchToCanvasRendering();
             }
         });
         
         this.mediaSource.addEventListener('error', (e) => {
             console.error('MediaSource error:', e);
-            this.switchToBlobFallback();
+            this.switchToCanvasRendering();
+        });
+    }
+
+    switchToCanvasRendering() {
+        console.log('Switching to canvas rendering mode');
+        this.renderingMode = 'canvas';
+        this.mediaSource = null;
+        this.sourceBuffer = null;
+        this.videoQueue = [];
+        
+        // Hide video element and show canvas
+        this.videoScreen.style.display = 'none';
+        this.canvasLayer.style.display = 'block';
+        
+        // Set up canvas for rendering
+        this.canvas = this.canvasLayer;
+        this.ctx = this.canvas.getContext('2d');
+        
+        // Request server to send JPEG frames instead of H.264
+        this.sendMessage({
+            type: 'switch_codec',
+            codec: 'jpeg'
         });
     }
 
     switchToBlobFallback() {
-        console.log('Switching to blob URL fallback');
+        console.log('Switching to blob URL fallback (deprecated)');
         this.mediaSource = null;
         this.sourceBuffer = null;
         this.videoQueue = [];
+        
+        // This method is now deprecated - switch to canvas instead
+        this.switchToCanvasRendering();
     }
 
     handleVideoFrame(data) {
@@ -919,8 +971,21 @@ class KVMClient {
         }
         
         try {
+            // Handle different rendering modes
+            if (this.renderingMode === 'canvas' || data.codec === 'jpeg') {
+                this.handleCanvasFrame(data);
+                return;
+            }
+            
             const videoData = this.base64ToArrayBuffer(data.data);
             console.log('Decoded video data size:', videoData.byteLength);
+            
+            // Validate H.264/H.265 data format
+            if ((data.codec === 'h264' || data.codec === 'h265') && !this.isValidVideoData(videoData)) {
+                console.warn('Invalid video data format, switching to canvas mode');
+                this.switchToCanvasRendering();
+                return;
+            }
             
             // Check if we have a valid MediaSource setup
             if (this.mediaSource && this.sourceBuffer && this.mediaSource.readyState === 'open') {
@@ -931,70 +996,125 @@ class KVMClient {
                     // Limit queue size to prevent memory issues
                     if (this.videoQueue.length > 10) {
                         console.warn('Video queue getting large, dropping oldest frames');
-                        this.videoQueue.shift();
+                        this.videoQueue = this.videoQueue.slice(-5); // Keep only last 5 frames
                     }
                 } else {
                     try {
                         this.sourceBuffer.appendBuffer(videoData);
-                        
-                        // Auto-play if video is paused (for initial frame)
-                        if (this.videoScreen.paused && this.videoScreen.readyState >= 2) {
-                            console.log('Starting video playback');
-                            this.videoScreen.play().catch(e => {
-                                console.warn('Auto-play failed:', e);
-                                // Try to enable autoplay with user interaction
-                                document.addEventListener('click', () => {
-                                    console.log('Playing video after user interaction');
-                                    this.videoScreen.play().catch(console.error);
-                                }, { once: true });
-                            });
-                        }
-                        
                     } catch (e) {
                         console.error('Error appending video data:', e);
-                        // Switch to blob fallback
-                        this.switchToBlobFallback();
-                        this.playVideoWithBlob(videoData, data.codec);
+                        this.switchToCanvasRendering();
                     }
                 }
             } else {
-                // Use blob URL fallback
-                console.log('Using blob URL fallback for video frame');
-                this.playVideoWithBlob(videoData, data.codec);
+                console.log('MediaSource not ready, switching to canvas rendering');
+                this.switchToCanvasRendering();
             }
             
             this.updateFrameStats();
             
         } catch (e) {
             console.error('Error handling video frame:', e);
+            this.switchToCanvasRendering();
         }
     }
 
-    playVideoWithBlob(videoData, codec) {
-        // For blob fallback, create a basic data URL
-        console.log('Playing video with blob fallback');
+    handleCanvasFrame(data) {
+        console.log('Rendering frame to canvas');
         
-        const codecString = this.getCodecString(codec);
-        const mimeType = `video/mp4; codecs="${codecString}"`;
+        try {
+            if (data.codec === 'jpeg' || data.format === 'jpeg') {
+                // Handle JPEG frame
+                const img = new Image();
+                img.onload = () => {
+                    if (this.canvas && this.ctx) {
+                        // Resize canvas if needed
+                        if (this.canvas.width !== img.width || this.canvas.height !== img.height) {
+                            this.canvas.width = img.width;
+                            this.canvas.height = img.height;
+                        }
+                        
+                        // Clear and draw
+                        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                        this.ctx.drawImage(img, 0, 0);
+                    }
+                    URL.revokeObjectURL(img.src);
+                };
+                
+                img.onerror = (e) => {
+                    console.error('Error loading JPEG image:', e);
+                };
+                
+                // Create blob URL for JPEG data
+                const videoData = this.base64ToArrayBuffer(data.data);
+                const blob = new Blob([videoData], { type: 'image/jpeg' });
+                img.src = URL.createObjectURL(blob);
+                
+            } else {
+                console.warn('Unsupported canvas frame format:', data.codec);
+            }
+            
+        } catch (e) {
+            console.error('Error rendering canvas frame:', e);
+        }
+    }
+
+    isValidVideoData(data) {
+        // Basic validation for H.264/H.265 NAL units
+        const view = new Uint8Array(data);
         
-        // Create blob with MP4 container
-        const blob = new Blob([videoData], { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        
-        // Clean up previous URL
-        if (this.videoScreen.src && this.videoScreen.src.startsWith('blob:')) {
-            URL.revokeObjectURL(this.videoScreen.src);
+        // Check for NAL unit start codes (0x00 0x00 0x00 0x01 or 0x00 0x00 0x01)
+        for (let i = 0; i < Math.min(view.length - 4, 100); i++) {
+            if ((view[i] === 0x00 && view[i+1] === 0x00 && view[i+2] === 0x00 && view[i+3] === 0x01) ||
+                (view[i] === 0x00 && view[i+1] === 0x00 && view[i+2] === 0x01)) {
+                return true;
+            }
         }
         
-        this.videoScreen.src = url;
-        this.videoScreen.play().catch(e => {
-            console.warn('Blob video play failed:', e);
+        return false;
+    }
+
+    requestKeyframe() {
+        console.log('Requesting keyframe from server');
+        this.sendMessage({
+            type: 'request_keyframe'
         });
+    }
+
+    handleAutoplayFailed() {
+        // Show a play button overlay
+        this.showPlayButton();
+    }
+
+    showPlayButton() {
+        if (this.playButton) return; // Already showing
         
-        // Clean up URL after some time
-        setTimeout(() => {
-            URL.revokeObjectURL(url);
-        }, 5000);
+        this.playButton = document.createElement('button');
+        this.playButton.textContent = '▶ Click to Play';
+        this.playButton.className = 'play-button-overlay';
+        this.playButton.style.cssText = `
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8);
+            color: white;
+            border: none;
+            padding: 15px 25px;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            z-index: 1000;
+        `;
+        
+        this.playButton.onclick = () => {
+            this.videoScreen.play().then(() => {
+                this.playButton.remove();
+                this.playButton = null;
+            }).catch(console.error);
+        };
+        
+        this.screenElement.appendChild(this.playButton);
     }
 
     handleWebRTCFrame(data) {
@@ -1024,6 +1144,40 @@ class KVMClient {
     }
 
     // Utility methods
+    getCodecConfigurations(codec) {
+        switch(codec) {
+            case 'h264':
+                return [
+                    'video/mp4; codecs="avc1.42E01E"',  // H.264 Baseline Profile Level 3.0 (most compatible)
+                    'video/mp4; codecs="avc1.42001E"',  // H.264 Baseline Profile Level 3.0 alternative
+                    'video/mp4; codecs="avc1.4D401F"',  // H.264 Main Profile Level 3.1
+                    'video/mp4; codecs="avc1.640028"',  // H.264 High Profile Level 4.0
+                    'video/mp4; codecs="avc1"',         // Generic H.264
+                    'video/webm; codecs="vp8"'          // VP8 fallback
+                ];
+            case 'h265':
+                return [
+                    'video/mp4; codecs="hev1.1.6.L93.B0"',  // H.265 Main Profile Level 3.1
+                    'video/mp4; codecs="hvc1.1.6.L93.B0"',  // H.265 Main Profile Level 3.1 alternative
+                    'video/mp4; codecs="hev1"',             // Generic H.265
+                    'video/mp4; codecs="avc1.42E01E"',      // H.264 fallback
+                    'video/webm; codecs="vp9"'              // VP9 fallback
+                ];
+            case 'av1':
+                return [
+                    'video/mp4; codecs="av01.0.01M.08"',    // AV1 Main Profile Level 3.0
+                    'video/webm; codecs="av01.0.01M.08"',   // AV1 in WebM
+                    'video/mp4; codecs="avc1.42E01E"',      // H.264 fallback
+                    'video/webm; codecs="vp9"'              // VP9 fallback
+                ];
+            default:
+                return [
+                    'video/mp4; codecs="avc1.42E01E"',      // Default to H.264
+                    'video/webm; codecs="vp8"'              // VP8 fallback
+                ];
+        }
+    }
+
     getCodecString(codec) {
         switch(codec) {
             case 'h264':

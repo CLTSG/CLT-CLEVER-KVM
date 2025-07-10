@@ -4,6 +4,7 @@ use axum::{
     handler::HandlerWithoutStateExt,
 };
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use tokio::{
     sync::{mpsc, broadcast},
     task::JoinHandle,
@@ -17,6 +18,26 @@ use axum::http::{StatusCode, Response};
 use axum::body::Body;
 
 use super::handlers::{kvm_client_handler, static_file_handler, ws_handler_with_stop};
+
+fn get_web_client_path() -> PathBuf {
+    // Try multiple possible locations for the web-client directory
+    let possible_paths = vec![
+        "web-client",                           // Current working directory
+        "src-tauri/web-client",                 // From project root
+        "../src-tauri/web-client",              // From dist directory  
+        "./src-tauri/web-client",               // Alternative from root
+    ];
+    
+    for path in possible_paths {
+        let full_path = PathBuf::from(path);
+        if full_path.exists() && full_path.is_dir() {
+            return full_path;
+        }
+    }
+    
+    // Fallback to the default path
+    PathBuf::from("web-client")
+}
 
 pub struct WebSocketServer {
     shutdown_tx: mpsc::Sender<()>,
@@ -42,6 +63,10 @@ impl WebSocketServer {
         let (stop_broadcast, _) = broadcast::channel::<()>(10);
         let stop_broadcast_clone = stop_broadcast.clone();
         
+        // Get the correct web-client path
+        let web_client_path = get_web_client_path();
+        log::info!("Using web-client directory: {:?}", web_client_path);
+        
         // Set up the router
         let app = Router::new()
             .route("/ws", get(move |ws: axum::extract::ws::WebSocketUpgrade, query: axum::extract::Query<std::collections::HashMap<String, String>>| {
@@ -51,7 +76,7 @@ impl WebSocketServer {
             .route("/kvm", get(kvm_client_handler))
             .route("/static/*path", get(static_file_handler))
             .fallback_service(
-                ServeDir::new("web-client")
+                ServeDir::new(&web_client_path)
                     .append_index_html_on_directories(true)
                     .not_found_service(handle_404.into_service())
             )
