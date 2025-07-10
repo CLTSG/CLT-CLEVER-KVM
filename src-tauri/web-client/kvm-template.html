@@ -41,10 +41,18 @@
                     </select>
                     
                     <select id="codec-dropdown" class="osd-select">
+                        <option value="webrtc">WebRTC (H.264)</option>
                         <option value="h264">H.264</option>
                         <option value="h265">H.265/HEVC</option>
                         <option value="av1">AV1</option>
                         <option value="jpeg">JPEG</option>
+                    </select>
+                    
+                    <select id="quality-dropdown" class="osd-select">
+                        <option value="auto">Auto Quality</option>
+                        <option value="high">High Quality</option>
+                        <option value="medium">Medium Quality</option>
+                        <option value="low">Low Quality</option>
                     </select>
                     
                     <button id="fullscreen-btn" class="osd-button">

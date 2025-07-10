@@ -43,6 +43,15 @@ pub struct ScreenCapture {
 }
 
 impl ScreenCapture {
+    // Getter methods for private fields
+    pub fn width(&self) -> usize {
+        self.width
+    }
+    
+    pub fn height(&self) -> usize {
+        self.height
+    }
+    
     // Enhanced method for monitor information
     fn get_monitor_info(display_index: usize) -> Result<MonitorInfo, Box<dyn std::error::Error>> {
         // Get system display info
@@ -418,6 +427,47 @@ impl ScreenCapture {
                     rgba_buffer.push(buffer[i + 1]); // G
                     rgba_buffer.push(buffer[i]);     // B
                     rgba_buffer.push(255);           // A
+                }
+            }
+        }
+
+        Ok(rgba_buffer)
+    }
+
+    pub fn capture_rgba(&mut self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        // Capture frame
+        let buffer = loop {
+            match self.capturer.frame() {
+                Ok(buffer) => break buffer,
+                Err(error) => {
+                    if error.kind() == WouldBlock {
+                        // Wait for the next frame
+                        thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    return Err(Box::new(error));
+                }
+            }
+        };
+
+        // Convert to RGBA
+        let mut rgba_buffer = Vec::with_capacity(self.width * self.height * 4);
+        let stride = buffer.len() / self.height;
+
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let i = stride * y + 4 * x;
+                if i + 3 < buffer.len() {
+                    rgba_buffer.push(buffer[i + 2]); // R
+                    rgba_buffer.push(buffer[i + 1]); // G
+                    rgba_buffer.push(buffer[i]);     // B
+                    rgba_buffer.push(255);           // A (fully opaque)
+                } else {
+                    // Handle edge case where stride calculation is off
+                    rgba_buffer.push(0); // R
+                    rgba_buffer.push(0); // G
+                    rgba_buffer.push(0); // B
+                    rgba_buffer.push(255); // A
                 }
             }
         }

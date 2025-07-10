@@ -68,7 +68,25 @@ class KVMClient {
         // Controls
         this.monitorDropdown = document.getElementById('monitor-dropdown');
         this.codecDropdown = document.getElementById('codec-dropdown');
+        this.qualityDropdown = document.getElementById('quality-dropdown');
         this.settingsPanel = document.querySelector('.settings-panel');
+        
+        // WebRTC quality tracking
+        this.currentQuality = 'medium';
+        this.adaptiveQuality = true;
+        this.networkStats = {
+            bandwidth: 0,
+            latency: 0,
+            packetLoss: 0
+        };
+        this.frameStats = {
+            framesReceived: 0,
+            keyframesReceived: 0,
+            totalBytes: 0,
+            currentFps: 0,
+            lastFrameCount: 0,
+            lastFpsUpdate: Date.now()
+        };
         
         // Settings controls - check if they exist before using
         this.settingStretch = document.getElementById('setting-stretch');
@@ -184,6 +202,19 @@ class KVMClient {
                 const newCodec = e.target.value;
                 if (newCodec !== this.currentCodec) {
                     this.switchCodec(newCodec);
+                }
+            });
+        }
+
+        if (this.qualityDropdown) {
+            this.qualityDropdown.addEventListener('change', (e) => {
+                const selectedQuality = e.target.value;
+                if (selectedQuality === 'auto') {
+                    this.adaptiveQuality = true;
+                    this.showNotification('Auto quality enabled', 2000);
+                } else {
+                    this.adaptiveQuality = false;
+                    this.switchQuality(selectedQuality);
                 }
             });
         }
@@ -561,6 +592,10 @@ class KVMClient {
         if (this.connected) {
             this.ws.close();
         }
+        
+        // Stop network monitoring
+        this.stopNetworkMonitoring();
+        
         window.location.href = '/';
     }
 
@@ -681,6 +716,9 @@ class KVMClient {
             this.pingInterval = setInterval(() => {
                 this.sendPing();
             }, 5000);
+
+            // Start network monitoring and adaptive quality
+            this.startNetworkMonitoring();
         };
         
         this.ws.onmessage = (event) => {
@@ -1143,86 +1181,78 @@ class KVMClient {
         }
     }
 
-    // Utility methods
-    getCodecConfigurations(codec) {
-        switch(codec) {
-            case 'h264':
-                return [
-                    'video/mp4; codecs="avc1.42E01E"',  // H.264 Baseline Profile Level 3.0 (most compatible)
-                    'video/mp4; codecs="avc1.42001E"',  // H.264 Baseline Profile Level 3.0 alternative
-                    'video/mp4; codecs="avc1.4D401F"',  // H.264 Main Profile Level 3.1
-                    'video/mp4; codecs="avc1.640028"',  // H.264 High Profile Level 4.0
-                    'video/mp4; codecs="avc1"',         // Generic H.264
-                    'video/webm; codecs="vp8"'          // VP8 fallback
-                ];
-            case 'h265':
-                return [
-                    'video/mp4; codecs="hev1.1.6.L93.B0"',  // H.265 Main Profile Level 3.1
-                    'video/mp4; codecs="hvc1.1.6.L93.B0"',  // H.265 Main Profile Level 3.1 alternative
-                    'video/mp4; codecs="hev1"',             // Generic H.265
-                    'video/mp4; codecs="avc1.42E01E"',      // H.264 fallback
-                    'video/webm; codecs="vp9"'              // VP9 fallback
-                ];
-            case 'av1':
-                return [
-                    'video/mp4; codecs="av01.0.01M.08"',    // AV1 Main Profile Level 3.0
-                    'video/webm; codecs="av01.0.01M.08"',   // AV1 in WebM
-                    'video/mp4; codecs="avc1.42E01E"',      // H.264 fallback
-                    'video/webm; codecs="vp9"'              // VP9 fallback
-                ];
-            default:
-                return [
-                    'video/mp4; codecs="avc1.42E01E"',      // Default to H.264
-                    'video/webm; codecs="vp8"'              // VP8 fallback
-                ];
+    // WebRTC quality switching
+    switchQuality(quality) {
+        if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+            this.websocket.send(JSON.stringify({
+                type: 'quality_change',
+                quality: quality
+            }));
+            
+            this.showNotification(`Quality changed to ${quality}`, 2000);
+            console.log(`Quality switched to: ${quality}`);
         }
     }
 
-    getCodecString(codec) {
-        switch(codec) {
-            case 'h264':
-                return 'avc1.42E01E'; // H.264 Baseline Profile Level 3.0 (most compatible)
-            case 'h265':
-                return 'hev1.1.6.L93.B0'; // H.265 Main Profile Level 3.1
-            case 'av1':
-                return 'av01.0.01M.08'; // AV1 Main Profile Level 3.0
-            default:
-                return 'avc1.42E01E'; // Default to H.264
+    // Auto quality adaptation based on network stats
+    autoAdaptQuality() {
+        if (!this.config.adaptiveQuality) return;
+        
+        const stats = this.networkStats;
+        let recommendedQuality = 'medium';
+        
+        // High quality: Good bandwidth (>6 Mbps), low latency (<50ms), minimal packet loss (<1%)
+        if (stats.bandwidth > 6000 && stats.latency < 50 && stats.packetLoss < 1.0) {
+            recommendedQuality = 'high';
+        }
+        // Low quality: Poor conditions
+        else if (stats.bandwidth < 2000 || stats.latency > 200 || stats.packetLoss > 5.0) {
+            recommendedQuality = 'low';
+        }
+        
+        if (recommendedQuality !== this.currentQuality) {
+            this.currentQuality = recommendedQuality;
+            this.switchQuality(recommendedQuality);
         }
     }
 
-    base64ToArrayBuffer(base64) {
-        const binaryString = atob(base64);
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-        }
-        return bytes.buffer;
-    }
-
-    updateStatus(title, message, showSpinner = false) {
-        if (!this.statusDisplay) return;
-        
-        const titleEl = this.statusDisplay.querySelector('h2');
-        const messageEl = this.statusDisplay.querySelector('p');
-        const spinner = this.statusDisplay.querySelector('.loading-spinner');
-        
-        if (titleEl) titleEl.textContent = title;
-        if (messageEl) messageEl.textContent = message;
-        
-        // Show status display
-        this.statusDisplay.style.display = 'block';
-        
-        if (showSpinner) {
-            if (!spinner) {
-                const spinnerEl = document.createElement('div');
-                spinnerEl.className = 'loading-spinner';
-                this.statusDisplay.appendChild(spinnerEl);
+    // Start network monitoring and adaptive quality
+    startNetworkMonitoring() {
+        // Send network stats every 5 seconds
+        this.networkMonitoringInterval = setInterval(() => {
+            this.sendNetworkStats();
+            if (this.adaptiveQuality) {
+                this.autoAdaptQuality();
             }
-        } else {
-            if (spinner) {
-                spinner.remove();
+        }, 5000);
+    }
+
+    // Stop network monitoring
+    stopNetworkMonitoring() {
+        if (this.networkMonitoringInterval) {
+            clearInterval(this.networkMonitoringInterval);
+            this.networkMonitoringInterval = null;
+        }
+    }
+
+    // Update network stats display
+    updateNetworkStats(stats) {
+        this.networkStats = stats;
+        
+        // Update UI if stats are visible
+        if (this.showStats) {
+            const bandwidthDisplay = document.getElementById('bandwidth-display');
+            const latencyDisplay = document.getElementById('latency-display');
+            const packetLossDisplay = document.getElementById('packet-loss-display');
+            
+            if (bandwidthDisplay) {
+                bandwidthDisplay.textContent = `${(stats.bandwidth / 1000).toFixed(1)} Mbps`;
+            }
+            if (latencyDisplay) {
+                latencyDisplay.textContent = `${stats.latency}ms`;
+            }
+            if (packetLossDisplay) {
+                packetLossDisplay.textContent = `${stats.packetLoss.toFixed(1)}%`;
             }
         }
     }

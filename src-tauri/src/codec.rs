@@ -424,6 +424,7 @@ pub struct WebRTCEncoderConfig {
     pub height: u32,
     pub bitrate: u32,
     pub framerate: u32,
+    pub keyframe_interval: u32,
     pub profile: H264Profile,
     pub level: H264Level,
     pub tune: H264Tune,
@@ -431,6 +432,27 @@ pub struct WebRTCEncoderConfig {
     pub use_hardware: bool,
     pub low_latency: bool,
     pub slice_mode: SliceMode,
+    pub quality_preset: String, // "fast", "medium", "slow" for quality profiles
+}
+
+impl Default for WebRTCEncoderConfig {
+    fn default() -> Self {
+        Self {
+            width: 1920,
+            height: 1080,
+            bitrate: 4000000,
+            framerate: 30,
+            keyframe_interval: 30,
+            profile: H264Profile::ConstrainedBaseline,
+            level: H264Level::Level31,
+            tune: H264Tune::ZeroLatency,
+            preset: H264Preset::Fast,
+            use_hardware: false,
+            low_latency: true,
+            slice_mode: SliceMode::Fixed(4),
+            quality_preset: "medium".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -495,6 +517,8 @@ impl WebRTCEncoderConfig {
             use_hardware: false, // Start with software for reliability
             low_latency: true,
             slice_mode: SliceMode::Fixed(4), // Multiple slices for better error resilience
+            keyframe_interval: 60, // Keyframe every 2 seconds at 30fps
+            quality_preset: "medium".to_string(), // Default quality preset
         }
     }
 }
@@ -831,29 +855,31 @@ impl WebRTCVideoEncoder {
         nal_units
     }
     
-    pub fn encode_frame(&self, rgba_data: Vec<u8>, force_keyframe: bool) -> Result<(), CodecError> {
-        self.encoder_tx.send(EncoderCommand::EncodeFrame {
-            data: rgba_data,
+    pub fn encode_frame(&mut self, rgba_data: &[u8], force_keyframe: bool) -> Result<Vec<u8>, CodecError> {
+        // Send encode command to the encoder thread
+        let command = EncoderCommand::EncodeFrame {
+            data: rgba_data.to_vec(),
             force_keyframe,
-        }).map_err(|e| CodecError::Encode(format!("Failed to send encode command: {}", e)))?;
+        };
         
-        Ok(())
+        self.encoder_tx.send(command)
+            .map_err(|e| CodecError::Encode(format!("Failed to send encode command: {}", e)))?;
+        
+        // Wait for encoded frame
+        match self.output_rx.recv() {
+            Ok(frame) => Ok(frame.data),
+            Err(e) => Err(CodecError::Encode(format!("Failed to receive encoded frame: {}", e))),
+        }
     }
-    
-    pub fn get_encoded_frame(&self) -> Option<EncodedFrame> {
-        self.output_rx.try_recv().ok()
-    }
-    
-    pub fn update_bitrate(&self, bitrate: u32) -> Result<(), CodecError> {
-        self.encoder_tx.send(EncoderCommand::UpdateBitrate(bitrate))
-            .map_err(|e| CodecError::Encode(format!("Failed to send bitrate update: {}", e)))?;
-        Ok(())
-    }
-    
-    pub fn request_keyframe(&self) -> Result<(), CodecError> {
+
+    pub fn request_keyframe(&mut self) -> Result<(), CodecError> {
         self.encoder_tx.send(EncoderCommand::RequestKeyframe)
-            .map_err(|e| CodecError::Encode(format!("Failed to send keyframe request: {}", e)))?;
-        Ok(())
+            .map_err(|e| CodecError::Encode(format!("Failed to request keyframe: {}", e)))
+    }
+
+    pub fn update_bitrate(&mut self, bitrate: u32) -> Result<(), CodecError> {
+        self.encoder_tx.send(EncoderCommand::UpdateBitrate(bitrate))
+            .map_err(|e| CodecError::Encode(format!("Failed to update bitrate: {}", e)))
     }
 }
 
