@@ -5,10 +5,30 @@ use axum::{
 };
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::sync::broadcast;
 
 use super::websocket::{handle_socket_wrapper, handle_socket_wrapper_with_stop};
+
+fn get_web_client_path() -> PathBuf {
+    // Try multiple possible locations for the web-client directory
+    let possible_paths = vec![
+        "web-client",                           // Current working directory
+        "src-tauri/web-client",                 // From project root
+        "../src-tauri/web-client",              // From dist directory  
+        "./src-tauri/web-client",               // Alternative from root
+    ];
+    
+    for path in possible_paths {
+        let full_path = PathBuf::from(path);
+        if full_path.exists() && full_path.is_dir() {
+            return full_path;
+        }
+    }
+    
+    // Fallback to the default path
+    PathBuf::from("web-client")
+}
 
 pub async fn kvm_client_handler(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
     // Parse the query parameters
@@ -36,9 +56,12 @@ pub async fn kvm_client_handler(Query(params): Query<HashMap<String, String>>) -
     ];
 
     // Load the HTML template
-    let template_path = Path::new("web-client/kvm-template.html");
+    let web_client_base = get_web_client_path();
+    let template_path = web_client_base.join("kvm-template.html");
     
-    let html = match fs::read_to_string(template_path) {
+    log::info!("Looking for template at: {:?}", template_path);
+    
+    let html = match fs::read_to_string(&template_path) {
         Ok(template) => {
             // Apply all replacements
             let mut result = template;
@@ -69,7 +92,10 @@ pub async fn kvm_client_handler(Query(params): Query<HashMap<String, String>>) -
 pub async fn static_file_handler(
     axum::extract::Path(path): axum::extract::Path<String>
 ) -> impl IntoResponse {
-    let file_path = format!("web-client/{}", path);
+    let web_client_base = get_web_client_path();
+    let file_path = web_client_base.join(&path);
+    
+    log::info!("Looking for static file at: {:?}", file_path);
     
     match fs::read(&file_path) {
         Ok(contents) => {
