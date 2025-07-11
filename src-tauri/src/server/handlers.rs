@@ -31,6 +31,8 @@ fn get_web_client_path() -> PathBuf {
 }
 
 pub async fn kvm_client_handler(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+    log::info!("KVM client page requested with parameters: {:?}", params);
+    
     // Parse the query parameters
     let stretch = params.get("stretch").map(|v| v == "true").unwrap_or(false);
     let mute = params.get("mute").map(|v| v == "true").unwrap_or(false);
@@ -39,6 +41,9 @@ pub async fn kvm_client_handler(Query(params): Query<HashMap<String, String>>) -
     let encryption = params.get("encryption").map(|v| v == "true").unwrap_or(false);
     let monitor = params.get("monitor").map(|v| v.parse::<usize>().unwrap_or(0)).unwrap_or(0);
     let codec = params.get("codec").map(|v| v.as_str()).unwrap_or("h264");
+
+    log::debug!("KVM client configuration - stretch: {}, mute: {}, audio: {}, monitor: {}, codec: {}", 
+               stretch, mute, audio, monitor, codec);
 
     // Prepare template replacements
     let replacements = [
@@ -147,6 +152,12 @@ pub async fn ws_handler_with_stop(
     let codec = params.get("codec").map(|v| v.to_string()).unwrap_or_else(|| "h264".to_string());
     let audio = params.get("audio").map(|v| v == "true").unwrap_or(false);
     
+    log::info!("WebSocket connection request - monitor: {}, codec: {}, audio: {}", monitor, codec, audio);
+    log::debug!("WebSocket query parameters: {:?}", params);
+    
     // Pass connection parameters to the WebSocket handler with stop signal
-    ws.on_upgrade(move |socket| handle_socket_wrapper_with_stop(socket, monitor, codec, audio, stop_rx))
+    ws.on_upgrade(move |socket| {
+        log::info!("WebSocket connection established");
+        handle_socket_wrapper_with_stop(socket, monitor, codec, audio, stop_rx)
+    })
 }

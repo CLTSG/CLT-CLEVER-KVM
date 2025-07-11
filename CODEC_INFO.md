@@ -2,47 +2,25 @@
 
 This document outlines the video and audio technologies used in Clever KVM for high-quality, low-latency remote desktop access.
 
-## Video Codecs
+## Video Codec
 
-Clever KVM supports multiple video codecs to balance quality, performance, and compatibility:
+Clever KVM uses H.264 (AVC) encoding via WebRTC for optimal performance:
 
-### H.264 (AVC)
+### WebRTC H.264 (AVC)
 
-- **Description**: The default codec, offering good compatibility across devices and browsers
+- **Description**: The primary and only codec, optimized for real-time streaming
 - **Advantages**: 
   - Hardware acceleration on most devices
-  - Wide browser support
-  - Good compression efficiency
-- **Best for**: General use cases where compatibility is important
-
-### H.265 (HEVC)
-
-- **Description**: The successor to H.264, offering better compression
-- **Advantages**:
-  - 25-50% better compression than H.264 at the same quality
-  - Hardware acceleration on newer devices
-  - Better quality at lower bitrates
-- **Best for**: Limited bandwidth scenarios or when highest quality is needed
-- **Limitations**: Limited browser support, may require client-side decoding
-
-### AV1
-
-- **Description**: Next-generation open codec with excellent compression
-- **Advantages**:
-  - Superior compression efficiency (30-50% better than H.265)
-  - Royalty-free
-  - Increasing hardware support
-- **Best for**: Future-proofing and very bandwidth-constrained scenarios
-- **Limitations**: Limited hardware support, higher CPU usage for software decoding
-
-### JPEG (Legacy)
-
-- **Description**: Frame-by-frame JPEG compression
-- **Advantages**:
-  - Universal compatibility
-  - Simple implementation
-- **Best for**: Fallback when other codecs aren't supported
-- **Limitations**: Higher bandwidth usage, lower quality
+  - Universal browser support via WebRTC
+  - Excellent compression efficiency for real-time use
+  - Built-in network adaptation and error correction
+  - Low-latency streaming with RTP protocol
+- **Best for**: All use cases requiring real-time remote desktop access
+- **Features**:
+  - Adaptive bitrate based on network conditions
+  - Automatic keyframe insertion for error recovery
+  - Slice-based encoding for better error resilience
+  - Hardware acceleration when available (NVENC, QuickSync, etc.)
 
 ## Performance Optimizations
 
@@ -54,14 +32,6 @@ Clever KVM automatically detects and uses hardware acceleration when available:
 - **AMD AMF**: For AMD GPUs
 - **Intel QuickSync**: For Intel CPUs with integrated graphics
 - **Apple VideoToolbox**: For macOS systems
-
-### Delta Encoding
-
-For JPEG mode, Clever KVM implements delta encoding:
-
-- The screen is divided into tiles (typically 64x64 pixels)
-- Only tiles that have changed since the last frame are transmitted
-- Significantly reduces bandwidth for static content
 
 ### Adaptive Quality
 
@@ -123,13 +93,13 @@ The system automatically adjusts quality based on network conditions:
 
 - **Web Browser**: Latest Chrome or Edge
 - **Network**: 5+ Mbps upload/download with low latency
-- **For H.265/AV1**: Recent hardware for hardware decoding support
+- **For H.264**: Any modern device with WebRTC support
 
 ## URL Parameters
 
 Customize the connection with these URL parameters:
 
-- `codec=h264|h265|av1|jpeg`: Select video codec
+- `codec=h264`: Select H.264 codec (default and only option)
 - `monitor=0,1,2,...`: Select which monitor to display
 - `audio=true`: Enable audio streaming
 - `mute=true`: Connect with audio muted
@@ -137,41 +107,17 @@ Customize the connection with these URL parameters:
 - `encryption=true`: Enable encrypted connection
 - `remoteOnly=true`: Hide UI controls for clean display
 
-Example: `http://hostname:9921/kvm?codec=h265;monitor=1;audio=true`
-
-# Video Codec Support in Clever KVM
-
-Clever KVM supports multiple video codecs for screen sharing, with different trade-offs between quality, compression efficiency, and compatibility.
-
-## Supported Codecs
-
-### H.264 (AVC)
-- **Default codec** with wide compatibility
-- Good balance of quality and compression
-- Hardware acceleration available on most devices
-- Works in all modern browsers
-
-### H.265 (HEVC)
-- Better compression than H.264 (up to 50% smaller files for same quality)
-- Higher quality at lower bitrates
-- Limited browser support
-- Hardware acceleration available on newer devices
-
-### AV1
-- Newest codec with best compression efficiency
-- Excellent quality at very low bitrates
-- Limited hardware acceleration support
-- Growing browser support
+Example: `http://hostname:9921/kvm?codec=h264;monitor=1;audio=true`
 
 ## FFmpeg Integration Notes
 
-Clever KVM uses the `ffmpeg-next` Rust crate (version 6.1.1) for codec operations, which is a safe Rust wrapper around the FFmpeg C API. Important considerations when working with this library:
+Clever KVM uses the `ffmpeg-next` Rust crate (version 6.1.1) for H.264 codec operations, which is a safe Rust wrapper around the FFmpeg C API. Important considerations when working with this library:
 
 1. The API can be challenging due to FFmpeg's C-based design, requiring careful handling of mutable references and lifetimes.
 
 2. For encoding video:
    - Create video frames in the appropriate pixel format (usually YUV420P)
-   - Set up encoder with the desired codec
+   - Set up encoder with H.264 codec
    - Configure parameters like bitrate, frame rate, and keyframe interval
    - Send frames to the encoder and retrieve encoded packets
 
@@ -187,7 +133,7 @@ Our implementation includes:
 
 - **Frame rate control**: Limits frame rate based on performance requirements
 - **Bitrate adaptation**: Dynamically adjusts bitrate based on network quality
-- **Quality scaling**: Adjusts JPEG quality or video encoding parameters
+- **Quality scaling**: Adjusts H.264 encoding parameters
 - **Keyframe insertion**: Forces keyframes on network issues or periodic intervals
 
 ## Common Issues and Solutions

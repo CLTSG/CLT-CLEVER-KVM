@@ -25,16 +25,12 @@
           <td>Enable encrypted connection</td>
         </tr>
         <tr>
-          <td><code>codec=h264|h265|av1</code></td>
-          <td>Select video codec (h264 is default)</td>
-        </tr>
-        <tr>
           <td><code>monitor=1</code></td>
           <td>Select specific monitor to display</td>
         </tr>
       </tbody>
     </table>
-    <p class="example">Example: <code>http://hostname:9921/kvm?stretch=true;codec=h265;monitor=1</code></p>
+    <p class="example">Example: <code>http://hostname:9921/kvm?stretch=true;monitor=1</code></p>
     
     <div class="features-section">
       <h3>Advanced Features</h3>
@@ -43,13 +39,7 @@
         <li><strong>Adaptive Quality:</strong> Automatically adjusts image quality based on network conditions.</li>
         <li><strong>Encryption:</strong> Secures the connection between client and server.</li>
         <li><strong>WebRTC Audio:</strong> Enables audio streaming with low latency.</li>
-        <li><strong>Multiple Codecs:</strong> 
-          <ul>
-            <li><strong>H.264:</strong> Widely compatible, good performance.</li>
-            <li><strong>H.265/HEVC:</strong> Better quality at lower bitrates, less compatible.</li>
-            <li><strong>AV1:</strong> Next-generation codec, best quality but limited hardware support.</li>
-          </ul>
-        </li>
+        <li><strong>H.264 Codec:</strong> Optimized WebRTC H.264 encoding for best compatibility and performance.</li>
         <li><strong>Hardware Acceleration:</strong> Uses GPU for encoding when available, reducing CPU usage.</li>
         <li><strong>Multi-monitor Support:</strong> Choose which monitor to share from systems with multiple displays.</li>
       </ul>

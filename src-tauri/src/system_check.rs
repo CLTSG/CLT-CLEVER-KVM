@@ -71,10 +71,7 @@ impl SystemCapabilities {
         // Initialize FFmpeg and check available encoders
         if let Ok(_) = ffmpeg_next::init() {
             let encoder_names = [
-                "libx264", "h264_nvenc", "h264_vaapi", "h264_qsv",
-                "libx265", "hevc_nvenc", "hevc_vaapi", "hevc_qsv",
-                "libaom-av1", "av1_nvenc", "av1_vaapi", "av1_qsv",
-                "mjpeg"
+                "libx264", "h264_nvenc", "h264_vaapi", "h264_qsv"
             ];
             
             for name in &encoder_names {
@@ -96,26 +93,6 @@ impl SystemCapabilities {
                     Some("h264_vaapi".to_string())
                 } else if self.available_encoders.contains(&"libx264".to_string()) {
                     Some("libx264".to_string())
-                } else {
-                    None
-                }
-            },
-            "h265" => {
-                if self.available_encoders.contains(&"hevc_nvenc".to_string()) && self.has_cuda {
-                    Some("hevc_nvenc".to_string())
-                } else if self.available_encoders.contains(&"hevc_vaapi".to_string()) {
-                    Some("hevc_vaapi".to_string())
-                } else if self.available_encoders.contains(&"libx265".to_string()) {
-                    Some("libx265".to_string())
-                } else {
-                    None
-                }
-            },
-            "av1" => {
-                if self.available_encoders.contains(&"av1_nvenc".to_string()) && self.has_cuda {
-                    Some("av1_nvenc".to_string())
-                } else if self.available_encoders.contains(&"libaom-av1".to_string()) {
-                    Some("libaom-av1".to_string())
                 } else {
                     None
                 }

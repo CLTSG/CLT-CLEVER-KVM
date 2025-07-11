@@ -1,4 +1,4 @@
-use crate::codec::{WebRTCVideoEncoder, WebRTCEncoderConfig};
+use crate::codec::{WebRTCVideoEncoder, WebRTCEncoderConfig, EncoderConfig, CodecType};
 use crate::capture::ScreenCapture;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant, SystemTime};
@@ -131,8 +131,19 @@ impl WebRTCStreamingSession {
         let config = initial_quality.get_config(width, height);
         
         // Initialize encoder
+        let encoder_config = EncoderConfig {
+            width,
+            height,
+            bitrate: config.bitrate as u64,
+            framerate: config.framerate,
+            keyframe_interval: config.keyframe_interval,
+            preset: "ultrafast".to_string(),
+            use_hardware: config.use_hardware,
+            codec_type: CodecType::H264,
+        };
+        
         let encoder = Arc::new(Mutex::new(
-            WebRTCVideoEncoder::new(config.clone())
+            WebRTCVideoEncoder::new(encoder_config)
                 .map_err(|e| format!("Failed to initialize encoder: {}", e))?
         ));
         
@@ -344,7 +355,18 @@ impl WebRTCStreamingSession {
                 
                 // Reinitialize encoder with new config
                 if let Ok(mut encoder) = self.encoder.lock() {
-                    if let Ok(new_encoder) = WebRTCVideoEncoder::new(config.clone()) {
+                    let encoder_config = EncoderConfig {
+                        width: config.width,
+                        height: config.height,
+                        bitrate: config.bitrate as u64,
+                        framerate: config.framerate,
+                        keyframe_interval: config.keyframe_interval,
+                        preset: "ultrafast".to_string(),
+                        use_hardware: config.use_hardware,
+                        codec_type: CodecType::H264,
+                    };
+                    
+                    if let Ok(new_encoder) = WebRTCVideoEncoder::new(encoder_config) {
                         *encoder = new_encoder;
                         info!("Encoder updated for quality {:?}", new_quality);
                     }

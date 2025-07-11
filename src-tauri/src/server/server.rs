@@ -82,11 +82,23 @@ impl WebSocketServer {
             )
             .layer(TraceLayer::new_for_http());
 
-        // Create TCP listener
+        // Create TCP listener - bind to all interfaces (0.0.0.0)
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
+        log::info!("Attempting to bind server to address: {}", addr);
+        
         let listener = match TcpListener::bind(addr).await {
-            Ok(listener) => listener,
-            Err(e) => return Err(format!("Failed to bind to address: {}", e)),
+            Ok(listener) => {
+                log::info!("Successfully bound to address: {}", addr);
+                match listener.local_addr() {
+                    Ok(local_addr) => log::info!("Server listening on local address: {}", local_addr),
+                    Err(e) => log::warn!("Could not get local address: {}", e),
+                }
+                listener
+            },
+            Err(e) => {
+                log::error!("Failed to bind to address {}: {}", addr, e);
+                return Err(format!("Failed to bind to address {}: {}. Make sure port {} is not in use and you have permission to bind to it.", addr, e, port));
+            },
         };
         
         log::info!("WebSocket server listening on {}", addr);

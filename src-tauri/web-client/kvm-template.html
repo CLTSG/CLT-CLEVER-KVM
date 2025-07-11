@@ -9,7 +9,7 @@
 <body>
     <!-- Main screen container -->
     <div id="screen">
-        <!-- For H.264/H.265/AV1 streaming -->
+        <!-- For H.264 streaming -->
         <video id="video-screen" autoplay playsinline muted></video>
         
         <canvas id="canvas-layer"></canvas>
@@ -37,15 +37,11 @@
             <div class="osd-bottom">
                 <div class="osd-controls">
                     <select id="monitor-dropdown" class="osd-select">
-                        <option value="loading">Loading monitors...</option>
+                        <option value="0">Primary Monitor</option>
                     </select>
                     
                     <select id="codec-dropdown" class="osd-select">
-                        <option value="webrtc">WebRTC (H.264)</option>
-                        <option value="h264">H.264</option>
-                        <option value="h265">H.265/HEVC</option>
-                        <option value="av1">AV1</option>
-                        <option value="jpeg">JPEG</option>
+                        <option value="h264" selected>H.264 (WebRTC)</option>
                     </select>
                     
                     <select id="quality-dropdown" class="osd-select">
