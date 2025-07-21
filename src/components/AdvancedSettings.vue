@@ -9,10 +9,10 @@
     <div class="setting-group">
       <h4>Codec Selection</h4>
       <label>
-        <input type="radio" v-model="settings.useH264" :value="true" 
+        <input type="radio" v-model="settings.useVP8" :value="true" 
                :disabled="disabled"
                checked />
-        WebRTC H.264 (Optimized for low latency)
+        WebRTC VP8 (Optimized for real-time streaming)
       </label>
     </div>
     

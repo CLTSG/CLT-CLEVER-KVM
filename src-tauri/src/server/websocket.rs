@@ -47,31 +47,34 @@ pub enum ControlMessage {
 }
 
 // Helper function to make the future Send
-pub async fn handle_socket_wrapper(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
+pub async fn handle_socket_wrapper(socket: WebSocket, monitor: usize, _codec: String, enable_audio: bool) {
+    // Always use VP8 codec
+    let codec = "vp8".to_string();
+    
     // Extract connection info for logging
-    info!("New WebSocket connection established - Monitor: {}, Codec: {}, Audio: {}", 
-          monitor, codec, enable_audio);
+    info!("New WebSocket connection established - Monitor: {}, Codec: VP8 (forced), Audio: {}", 
+          monitor, enable_audio);
     
-    let codec_for_log = codec.clone();
-    handle_socket(socket, monitor, codec, enable_audio).await;
+    handle_socket(socket, monitor, codec.clone(), enable_audio).await;
     
-    info!("WebSocket connection closed - Monitor: {}, Codec: {}", monitor, codec_for_log);
+    info!("WebSocket connection closed - Monitor: {}, Codec: VP8", monitor);
 }
 
 // New helper function with stop signal
 pub async fn handle_socket_wrapper_with_stop(
     socket: WebSocket, 
     monitor: usize, 
-    codec: String, 
+    _codec: String, 
     enable_audio: bool, 
     stop_rx: broadcast::Receiver<()>
 ) {
-    // Use WebRTC H.264 streaming for optimal performance
-    let codec = if codec == "h264" || codec == "webrtc" {
+    // Always use VP8 codec
+    let codec = "vp8".to_string();
+        // Use WebRTC H.264 streaming for optimal performance
+    let codec = if codec == "vp8" || codec == "webrtc" {
         "webrtc".to_string()
     } else {
-        info!("Codec {} not supported for WebRTC, falling back to H.264", codec);
-        "webrtc".to_string()
+        "vp8".to_string()  // Default to VP8
     };
     
     handle_socket_with_stop(socket, monitor, codec, enable_audio, stop_rx).await;
@@ -86,11 +89,12 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
         handle_webrtc_socket(socket, monitor, enable_audio).await;
     } else {
         // Fallback to legacy for other codecs
-        handle_legacy_socket(socket, monitor, codec, enable_audio).await;
+        handle_legacy_socket(socket, monitor, "vp8".to_string(), enable_audio).await;
     }
 }
 
-async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
+async fn handle_legacy_socket(socket: WebSocket, monitor: usize, _codec: String, enable_audio: bool) {
+    let codec = "vp8".to_string(); // Always use VP8
     info!("New WebSocket connection: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
@@ -125,7 +129,7 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
     };
     
     // Setup screen capture in a separate thread
-    let selected_codec = codec.clone();
+    let selected_codec = "vp8".to_string(); // Always use VP8
     let screen_handle = std::thread::spawn(move || {
         // Initialize screen capture for the selected monitor
         let mut screen_capturer = match ScreenCapture::new(Some(monitor_index)) {
@@ -152,7 +156,7 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
         // Convert codec string to enum
         let codec_type = CodecType::from_string(&selected_codec);
         
-        // Initialize codec encoder for WebRTC H.264
+        // Initialize codec encoder for WebRTC VP8
         let mut video_encoder: Option<VideoEncoder> = {
             // Create encoder configuration - default to software encoding
             let encoder_config = EncoderConfig {
@@ -235,7 +239,7 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
                                 
                                 // Send encoded frame as video_frame message
                                 if let Err(e) = encoded_tx.blocking_send(Ok(encoded)) {
-                                    error!("Failed to send encoded frame to websocket: {}", e);
+                                    info!("Encoded frame channel closed, stopping screen capture thread: {}", e);
                                     break;
                                 }
                             },
@@ -402,7 +406,7 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
         "hostname": hostname,
         "monitor": selected_monitor,
         "monitor_index": monitor_index,
-        "codec": "h264",  // Always send h264 since that's what the client expects
+        "codec": "vp8",  // Always send VP8 since that's our only supported codec
         "tile_width": tile_width,
         "tile_height": tile_height,
         "tile_size": tile_size,
@@ -637,9 +641,9 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
             }
         }
         
-        // Handle H.264 codec
-        if codec == "h264" {
-            // Process H.264 encoded frames
+        // Handle VP8 codec
+        if codec == "vp8" {
+            // Process VP8 encoded frames
             match encoded_rx.recv().await {
                 Some(Ok(encoded_data)) => {
                     // Base64 encode the data
@@ -718,8 +722,26 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
     // Clean up
     info!("Cleaning up WebSocket connection resources");
     
-    // Wait for screen capture thread to finish
-    let _ = screen_handle.join();
+    // Wait for screen capture thread to finish with timeout
+    let join_result = tokio::time::timeout(
+        tokio::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || screen_handle.join())
+    ).await;
+    
+    match join_result {
+        Ok(Ok(Ok(()))) => {
+            info!("Screen capture thread joined successfully");
+        },
+        Ok(Ok(Err(e))) => {
+            error!("Screen capture thread panicked: {:?}", e);
+        },
+        Ok(Err(e)) => {
+            error!("Failed to spawn blocking task for thread join: {:?}", e);
+        },
+        Err(_) => {
+            warn!("Timeout waiting for screen capture thread to join - thread may still be running");
+        }
+    }
 }
 
 // New handler with stop signal
@@ -738,17 +760,18 @@ pub async fn handle_socket_with_stop(
         handle_webrtc_socket_with_stop(socket, monitor, enable_audio, stop_rx).await;
     } else {
         // Fallback to legacy for other codecs
-        handle_legacy_socket_with_stop(socket, monitor, codec, enable_audio, stop_rx).await;
+        handle_legacy_socket_with_stop(socket, monitor, "vp8".to_string(), enable_audio, stop_rx).await;
     }
 }
 
 async fn handle_legacy_socket_with_stop(
     socket: WebSocket, 
     monitor: usize, 
-    codec: String, 
+    _codec: String, 
     enable_audio: bool, 
     stop_rx: broadcast::Receiver<()>
 ) {
+    let codec = "vp8".to_string(); // Always use VP8
     info!("New WebSocket connection: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
@@ -845,13 +868,14 @@ async fn handle_legacy_socket_with_stop(
         // Control message handling (codec switch)
         let (codec_switch_tx, codec_switch_rx) = std::sync::mpsc::channel::<String>();
         let mut control_rx_for_thread = control_rx;
-        // Spawn a thread to listen for control messages and forward codec switches
+        // Spawn a thread to listen for control messages (codec switching disabled)
         let codec_switch_tx_clone = codec_switch_tx.clone();
         std::thread::spawn(move || {
             while let Some(control_msg) = control_rx_for_thread.blocking_recv() {
-                if let ControlMessage::SwitchCodec { codec } = control_msg {
-                    info!("[Screen Thread] Received codec switch to: {}", codec);
-                    let _ = codec_switch_tx_clone.send(codec);
+                if let ControlMessage::SwitchCodec { codec: _ } = control_msg {
+                    info!("[Screen Thread] Codec switch requested but VP8 is enforced");
+                    // Always use VP8 - ignore codec switch requests
+                    let _ = codec_switch_tx_clone.send("vp8".to_string());
                 }
             }
         });
@@ -862,10 +886,19 @@ async fn handle_legacy_socket_with_stop(
         info!("Starting screen capture loop...");
 
         loop {
-            // Check for stop signal (non-blocking)
-            if thread_stop_rx.try_recv().is_ok() {
-                info!("Screen capture thread received stop signal, exiting");
-                break;
+            // Check for stop signal (non-blocking) - check multiple times to ensure we catch it
+            match thread_stop_rx.try_recv() {
+                Ok(_) => {
+                    info!("Screen capture thread received stop signal, exiting");
+                    break;
+                },
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    info!("Screen capture thread stop channel disconnected, exiting");
+                    break;
+                },
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    // No stop signal yet, continue
+                }
             }
 
             // Check for codec switch (non-blocking)
@@ -875,7 +908,7 @@ async fn handle_legacy_socket_with_stop(
                     current_codec = new_codec.clone();
                     codec_type = CodecType::from_string(&current_codec);
                     // Drop encoder if switching codecs
-                    if current_codec != "h264" {
+                    if current_codec != "vp8" {
                         video_encoder = None;
                     } else {
                         // Re-initialize encoder for new codec
@@ -920,7 +953,7 @@ async fn handle_legacy_socket_with_stop(
                                 _frames_processed += 1;
                                 debug!("Successfully encoded frame {} ({} bytes)", frame_count, encoded.len());
                                 if let Err(_) = encoded_tx.blocking_send(Ok(encoded)) {
-                                    error!("Failed to send encoded frame to WebSocket handler");
+                                    info!("Encoded frame channel closed, stopping screen capture thread");
                                     break;
                                 }
                             },
@@ -967,6 +1000,12 @@ async fn handle_legacy_socket_with_stop(
                 warn!("Video encoder not available for frame {}", frame_count);
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
+            }
+
+            // Check for stop signal again before sleeping
+            if thread_stop_rx.try_recv().is_ok() {
+                info!("Screen capture thread received stop signal during sleep, exiting");
+                break;
             }
 
             std::thread::sleep(Duration::from_millis(1000 / 30));
@@ -1128,11 +1167,31 @@ async fn handle_legacy_socket_with_stop(
     }
     
     // Send stop signal to screen capture thread
-    let _ = thread_stop_tx.send(()).await;
+    info!("Sending stop signal to screen capture thread");
+    let _ = thread_stop_tx.try_send(());
     
-    // Wait for screen capture thread to finish
-    if let Err(e) = tokio::task::spawn_blocking(move || screen_handle.join()).await {
-        error!("Failed to join screen capture thread: {:?}", e);
+    // Give the thread a moment to process the stop signal
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    
+    // Wait for screen capture thread to finish with timeout
+    let join_result = tokio::time::timeout(
+        tokio::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || screen_handle.join())
+    ).await;
+    
+    match join_result {
+        Ok(Ok(Ok(()))) => {
+            info!("Screen capture thread joined successfully");
+        },
+        Ok(Ok(Err(e))) => {
+            error!("Screen capture thread panicked: {:?}", e);
+        },
+        Ok(Err(e)) => {
+            error!("Failed to spawn blocking task for thread join: {:?}", e);
+        },
+        Err(_) => {
+            warn!("Timeout waiting for screen capture thread to join - thread may still be running");
+        }
     }
     
     info!("WebSocket connection with stop signal finished cleanup");
@@ -1199,7 +1258,7 @@ async fn handle_webrtc_socket(socket: WebSocket, monitor: usize, enable_audio: b
             keyframe_interval: 30,
             preset: "ultrafast".to_string(),
             use_hardware: false, // Start with software, fallback is built-in
-            codec_type: CodecType::H264,
+            codec_type: CodecType::VP8,
         };
         
         let mut encoder = match VideoEncoder::new(encoder_config.clone()) {
@@ -1307,8 +1366,8 @@ async fn handle_webrtc_socket(socket: WebSocket, monitor: usize, enable_audio: b
                             }
                         },
                         Ok(ControlMessage::SwitchCodec { codec: _ }) => {
-                            // WebRTC doesn't support codec switching currently
-                            warn!("Codec switching not supported in WebRTC mode");
+                            // VP8 is enforced - codec switching disabled
+                            warn!("Codec switching disabled - VP8 is enforced");
                         },
                         Err(e) => {
                             error!("Failed to parse control message: {}", e);
@@ -1362,7 +1421,7 @@ async fn handle_webrtc_socket(socket: WebSocket, monitor: usize, enable_audio: b
     let server_info = json!({
         "type": "server_info",
         "monitor": monitor,
-        "codec": "h264",  // Always send h264 since that's what the client expects
+        "codec": "vp8",  // Always send VP8 since that's our only supported codec
         "audio": enable_audio,
         "width": 1920, // TODO: Get actual screen dimensions
         "height": 1080,

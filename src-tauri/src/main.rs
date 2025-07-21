@@ -29,7 +29,7 @@ struct ServerOptions {
     adaptive_quality: Option<bool>,
     encryption: Option<bool>,
     webrtc: Option<bool>,
-    h264: Option<bool>,
+    vp8: Option<bool>,
     monitor: Option<usize>,
 }
 
@@ -103,8 +103,8 @@ fn start_server(app_handle: tauri::AppHandle, port: Option<u16>, options: Option
     
     // Store options
     if let Some(opts) = options {
-        debug!("Server options: delta_encoding={:?}, adaptive_quality={:?}, encryption={:?}, webrtc={:?}, h264={:?}, monitor={:?}",
-               opts.delta_encoding, opts.adaptive_quality, opts.encryption, opts.webrtc, opts.h264, opts.monitor);
+        debug!("Server options: delta_encoding={:?}, adaptive_quality={:?}, encryption={:?}, webrtc={:?}, vp8={:?}, monitor={:?}",
+               opts.delta_encoding, opts.adaptive_quality, opts.encryption, opts.webrtc, opts.vp8, opts.monitor);
         state.options = opts;
     }
 

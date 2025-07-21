@@ -44,7 +44,6 @@ webrtc = "0.9.0"
 display-info = "0.4.3"
 anyhow = "1.0.75"
 thiserror = "1.0.50"
-h264-profile-level-id = "0.1.1"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

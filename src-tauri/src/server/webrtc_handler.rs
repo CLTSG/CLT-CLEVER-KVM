@@ -139,7 +139,7 @@ impl WebRTCStreamingSession {
             keyframe_interval: config.keyframe_interval,
             preset: "ultrafast".to_string(),
             use_hardware: config.use_hardware,
-            codec_type: CodecType::H264,
+            codec_type: CodecType::VP8,
         };
         
         let encoder = Arc::new(Mutex::new(
@@ -363,7 +363,7 @@ impl WebRTCStreamingSession {
                         keyframe_interval: config.keyframe_interval,
                         preset: "ultrafast".to_string(),
                         use_hardware: config.use_hardware,
-                        codec_type: CodecType::H264,
+                        codec_type: CodecType::VP8,
                     };
                     
                     if let Ok(new_encoder) = WebRTCVideoEncoder::new(encoder_config) {

@@ -31,30 +31,30 @@ pub struct EncoderConfig {
 // Define codec types
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CodecType {
-    H264,
+    VP8,
 }
 
 impl CodecType {
     pub fn from_string(codec: &str) -> Self {
         match codec.to_lowercase().as_str() {
-            "h264" | "h.264" | "avc" => Self::H264,
-            _ => Self::H264, // Default fallback
+            "vp8" => Self::VP8,
+            _ => Self::VP8, // Default fallback
         }
     }
     
     pub fn to_ffmpeg_codec_id(&self) -> ffmpeg::codec::id::Id {
         match self {
-            Self::H264 => ffmpeg::codec::id::Id::H264,
+            Self::VP8 => ffmpeg::codec::id::Id::VP8,
         }
     }
     
     pub fn get_encoder_name(&self, use_hardware: bool) -> &'static str {
         match self {
-            Self::H264 => {
+            Self::VP8 => {
                 if use_hardware {
-                    "h264_nvenc" // Try NVIDIA hardware encoder first
+                    "vp8_vaapi" // Try hardware encoder first
                 } else {
-                    "libx264" // Software encoder
+                    "libvpx" // Software encoder
                 }
             }
         }
@@ -221,21 +221,24 @@ impl VideoEncoder {
         let mut opts = ffmpeg::Dictionary::new();
         
         match self.codec_type {
-            CodecType::H264 => {
+            CodecType::VP8 => {
                 if self.use_hardware {
-                    // NVENC hardware encoder options
-                    opts.set("preset", "fast");
-                    opts.set("tune", "ll");
-                    opts.set("profile", "high");
-                    opts.set("level", "4.1");
-                    opts.set("rc", "cbr");
+                    // Hardware encoder options for VP8
+                    opts.set("deadline", "realtime");
+                    opts.set("cpu-used", "16");  // Maximum speed
+                    opts.set("lag-in-frames", "0");
+                    opts.set("error-resilient", "1");
                 } else {
-                    // Software encoder options for low latency
-                    opts.set("preset", &self.preset);
-                    opts.set("tune", "zerolatency");
-                    opts.set("profile", "high");
-                    opts.set("level", "4.1");
-                    opts.set("crf", "23");
+                    // Software encoder options for VP8 real-time
+                    opts.set("deadline", "realtime");
+                    opts.set("cpu-used", "16");  // Maximum speed
+                    opts.set("lag-in-frames", "0");  // No look-ahead for low latency
+                    opts.set("error-resilient", "1");
+                    opts.set("max-intra-rate", "300");
+                    opts.set("quality", "realtime");
+                    opts.set("noise-sensitivity", "0");
+                    opts.set("sharpness", "0");
+                    opts.set("static-thresh", "0");
                 }
             },
         }
@@ -403,13 +406,9 @@ impl VideoEncoder {
         // Try to open with minimal options
         let mut opts = ffmpeg::Dictionary::new();
         match config.codec_type {
-            CodecType::H264 => {
-                if encoder_name.contains("nvenc") {
-                    opts.set("preset", "fast");
-                } else {
-                    opts.set("preset", "ultrafast");
-                    opts.set("tune", "zerolatency");
-                }
+            CodecType::VP8 => {
+                opts.set("deadline", "realtime");
+                opts.set("cpu-used", "16");
             }
         }
 

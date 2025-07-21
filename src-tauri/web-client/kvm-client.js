@@ -14,7 +14,7 @@ class KVMClient {
         this.qualityLevel = 85;
         this.availableMonitors = [];
         this.currentMonitor = config.monitor;
-        this.currentCodec = config.codec;
+        this.currentCodec = "vp8"; // Always use VP8
         this.mediaSource = null;
         this.sourceBuffer = null;
         this.videoQueue = [];
@@ -55,7 +55,7 @@ class KVMClient {
     }
 
     initializeElements() {
-        // Main elements - only use video element for H.264
+        // Main elements - VP8 uses video element for WebRTC streaming
         this.videoScreen = document.getElementById('video-screen');
         this.canvasLayer = document.getElementById('canvas-layer');
         if (this.canvasLayer) {
@@ -203,7 +203,7 @@ class KVMClient {
             });
         }
 
-        // Codec dropdown is no longer needed - using WebRTC H.264 only
+        // Codec dropdown is no longer needed - using WebRTC VP8 only
 
         if (this.qualityDropdown) {
             this.qualityDropdown.addEventListener('change', (e) => {
@@ -290,7 +290,7 @@ class KVMClient {
     setupInputHandlers() {
         const screenContainer = document.getElementById('screen');
         
-        // Mouse events - use video element for all codecs
+        // Mouse events - use video element for VP8 WebRTC
         ['mousedown', 'mouseup', 'mousemove', 'wheel'].forEach(event => {
             if (this.videoScreen) {
                 this.videoScreen.addEventListener(event, (e) => this.handleMouseEvent(e));
@@ -725,7 +725,7 @@ class KVMClient {
             wsHost = `${hostname}:9921`;
         }
         
-        const wsUrl = `${protocol}//${wsHost}/ws?monitor=${this.currentMonitor}&codec=${this.currentCodec}${this.config.audio ? '&audio=true' : ''}`;
+        const wsUrl = `${protocol}//${wsHost}/ws?monitor=${this.currentMonitor}&codec=vp8${this.config.audio ? '&audio=true' : ''}`;
         
         console.log('Connecting to WebSocket:', wsUrl);
         console.log('WebSocket host resolved to:', wsHost);
@@ -847,11 +847,11 @@ class KVMClient {
             this.osdTitle.textContent = `${data.hostname} - Monitor ${data.monitor} (${data.width}x${data.height})`;
         }
         
-        // Normalize codec name - server sends "webrtc" but we use "h264" internally
-        this.currentCodec = data.codec === 'webrtc' ? 'h264' : (data.codec || this.config.codec);
-        console.log('Normalized codec from', data.codec, 'to', this.currentCodec);
+        // Normalize codec name - server sends "webrtc" but we use "vp8" internally
+        this.currentCodec = "vp8"; // Always use VP8
+        console.log('Using VP8 codec');
         if (this.codecDropdown) {
-            this.codecDropdown.value = 'h264'; // Always set to h264 since it's our only option
+            this.codecDropdown.value = 'vp8'; // Always set to VP8
         }
         
         // Initialize canvas size
@@ -898,8 +898,8 @@ class KVMClient {
             return;
         }
         
-        // For H.264 via WebRTC, we need to set up the video element properly
-        if (this.currentCodec === 'h264' || this.currentCodec === 'webrtc') {
+        // For VP8 via WebRTC, we need to set up the video element properly
+        if (this.currentCodec === 'vp8' || this.currentCodec === 'webrtc') {
             // Set video dimensions
             this.videoScreen.width = this.screenWidth;
             this.videoScreen.height = this.screenHeight;
@@ -915,8 +915,8 @@ class KVMClient {
                 this.videoScreen.style.objectFit = 'contain';
             }
         
-            // Initialize MediaSource for H.264 if supported
-            if (this.currentCodec === 'h264') {
+            // Initialize MediaSource for VP8 if supported
+            if (this.currentCodec === 'vp8') {
                 this.initializeMediaSource(this.currentCodec);
             }
         }
@@ -1111,8 +1111,8 @@ class KVMClient {
             const videoData = this.base64ToArrayBuffer(data.data);
             console.log('Decoded video data size:', videoData.byteLength);
             
-            // Validate H.264 data format
-            if (data.codec === 'h264' && !this.isValidVideoData(videoData)) {
+            // Validate VP8 data format
+            if (data.codec === 'vp8' && !this.isValidVideoData(videoData)) {
                 console.warn('Invalid video data format, switching to canvas mode');
                 this.switchToCanvasRendering();
                 return;
@@ -1154,10 +1154,10 @@ class KVMClient {
         console.log('Rendering frame to canvas, is_keyframe:', data.is_keyframe);
         
         try {
-            // Default to h264 if codec is not specified (WebRTC frames)
-            const codec = data.codec || 'h264';
+            // Default to VP8 if codec is not specified (WebRTC frames)
+            const codec = data.codec || 'vp8';
             
-            if (codec === 'h264' || codec === 'webrtc') {
+            if (codec === 'vp8' || codec === 'webrtc') {
                 const videoData = this.base64ToArrayBuffer(data.data);
                 
                 // For canvas mode, be more lenient with non-keyframes when accessed via network
@@ -1496,9 +1496,9 @@ class KVMClient {
                 return;
             }
 
-            // WebRTC frames are always H.264 encoded - set codec if not present
+            // WebRTC frames are always VP8 encoded - set codec if not present
             if (!data.codec) {
-                data.codec = 'h264';
+                data.codec = 'vp8';
             }
 
             // Skip non-keyframes if we haven't received a keyframe yet
@@ -1709,40 +1709,17 @@ class KVMClient {
     }
 
     normalizeCodec(codec) {
-        // Normalize codec names - server may send different variations
-        if (!codec) return 'h264';
-        
-        const lowerCodec = codec.toLowerCase();
-        if (lowerCodec === 'webrtc' || lowerCodec === 'h264' || lowerCodec.includes('avc')) {
-            return 'h264';
-        }
-        
-        // Default to h264 since it's our only supported codec
-        return 'h264';
+        // Always return VP8 since it's our only supported codec
+        return 'vp8';
     }
 
     getCodecConfigurations(codec) {
-        // Since we only support H.264 WebRTC, return H.264 codec configurations
-        const normalizedCodec = this.normalizeCodec(codec);
-        console.log(`Getting codec configurations for: ${normalizedCodec}`);
+        // Since we only support VP8 WebRTC, return VP8 codec configurations
+        console.log(`Getting VP8 codec configurations`);
         
-        if (normalizedCodec === 'h264') {
-            return [
-                'video/mp4; codecs="avc1.42E01E"',  // H.264 Baseline Profile
-                'video/mp4; codecs="avc1.4D401E"',  // H.264 Main Profile
-                'video/mp4; codecs="avc1.64001E"',  // H.264 High Profile
-                'video/mp4; codecs="avc1.42001E"',  // H.264 Baseline Profile (alternative)
-                'video/mp4; codecs="avc1.4D4028"',  // H.264 Main Profile Level 4.0
-                'video/mp4; codecs="avc1.640028"'   // H.264 High Profile Level 4.0
-            ];
-        }
-        
-        // Fallback - should not happen since we only support H.264
-        console.warn(`Unsupported codec: ${codec}, falling back to H.264`);
         return [
-            'video/mp4; codecs="avc1.42E01E"',
-            'video/mp4; codecs="avc1.4D401E"',
-            'video/mp4; codecs="avc1.64001E"'
+            'video/webm; codecs="vp8"',       // VP8 in WebM container
+            'video/webm; codecs=vp8',         // Alternative VP8 format
         ];
     }
 
@@ -1809,7 +1786,7 @@ document.addEventListener('DOMContentLoaded', () => {
         remoteOnly: false,
         encryption: false,
         monitor: 0,
-        codec: "h264"
+        codec: "vp8"
     };
 
     // Initialize template components
