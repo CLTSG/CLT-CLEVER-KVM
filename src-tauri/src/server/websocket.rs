@@ -70,27 +70,22 @@ pub async fn handle_socket_wrapper_with_stop(
 ) {
     // Always use VP8 codec
     let codec = "vp8".to_string();
-        // Use WebRTC H.264 streaming for optimal performance
-    let codec = if codec == "vp8" || codec == "webrtc" {
-        "webrtc".to_string()
-    } else {
-        "vp8".to_string()  // Default to VP8
-    };
+    
+    // Extract connection info for logging
+    info!("New WebSocket connection with stop signal - Monitor: {}, Codec: VP8 (forced), Audio: {}", 
+          monitor, enable_audio);
     
     handle_socket_with_stop(socket, monitor, codec, enable_audio, stop_rx).await;
+    
+    info!("WebSocket connection with stop signal closed - Monitor: {}, Codec: VP8", monitor);
 }
 
 pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
     info!("New WebSocket connection: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
-    // Use WebRTC streaming for H.264 and optimal performance
-    if codec == "webrtc" {
-        handle_webrtc_socket(socket, monitor, enable_audio).await;
-    } else {
-        // Fallback to legacy for other codecs
-        handle_legacy_socket(socket, monitor, "vp8".to_string(), enable_audio).await;
-    }
+    // Always use VP8 legacy socket handler
+    handle_legacy_socket(socket, monitor, "vp8".to_string(), enable_audio).await;
 }
 
 async fn handle_legacy_socket(socket: WebSocket, monitor: usize, _codec: String, enable_audio: bool) {
@@ -182,10 +177,10 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, _codec: String,
                 },
                 Err(e) => {
                     error!("Software encoder initialization failed: {}", e);
-                    error!("WebRTC H.264 encoder is required for operation");
+                    error!("VP8 encoder is required for operation");
                     
                     // Send error message to client
-                    let error_msg = serde_json::json!({
+                    let _error_msg = serde_json::json!({
                         "type": "error",
                         "message": format!("Failed to initialize video encoder: {}", e)
                     });
@@ -213,7 +208,7 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, _codec: String,
         // Capture loop
         loop {
             if let Some(encoder) = &mut video_encoder {
-                // WebRTC H.264 encoding
+                // VP8 encoding
                 // Measure capture time
                 let capture_start = Instant::now();
                 match screen_capturer.capture_raw() {
@@ -755,13 +750,8 @@ pub async fn handle_socket_with_stop(
     info!("New WebSocket connection with stop signal: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
-    // Use WebRTC streaming for optimal performance
-    if codec == "webrtc" {
-        handle_webrtc_socket_with_stop(socket, monitor, enable_audio, stop_rx).await;
-    } else {
-        // Fallback to legacy for other codecs
-        handle_legacy_socket_with_stop(socket, monitor, "vp8".to_string(), enable_audio, stop_rx).await;
-    }
+    // Always use VP8 legacy socket handler with stop signal
+    handle_legacy_socket_with_stop(socket, monitor, "vp8".to_string(), enable_audio, stop_rx).await;
 }
 
 async fn handle_legacy_socket_with_stop(
@@ -1111,7 +1101,7 @@ async fn handle_legacy_socket_with_stop(
                     break;
                 }
                 
-                // Handle encoded frames (H.264)
+                // Handle encoded frames (VP8)
                 result = encoded_rx.recv() => {
                     match result {
                         Some(Ok(frame_data)) => {
@@ -1198,7 +1188,7 @@ async fn handle_legacy_socket_with_stop(
 }
 
 async fn handle_webrtc_socket(socket: WebSocket, monitor: usize, enable_audio: bool) {
-    info!("Starting WebRTC H.264 streaming session: monitor={}, audio={}", monitor, enable_audio);
+    info!("Starting WebRTC VP8 streaming session: monitor={}, audio={}", monitor, enable_audio);
     
     // Create channels for frame data and control
     let (frame_tx, mut frame_rx) = mpsc::channel::<EncodedFrameMessage>(10);
@@ -1228,7 +1218,7 @@ async fn handle_webrtc_socket(socket: WebSocket, monitor: usize, enable_audio: b
         "width": screen_width,
         "height": screen_height,
         "hostname": gethostname::gethostname().to_string_lossy(),
-        "codec": "webrtc",
+        "codec": "vp8",  // Always send VP8 since that's our only supported codec
         "audio": enable_audio,
         "monitor": monitor
     });
@@ -1479,7 +1469,7 @@ async fn handle_webrtc_socket_with_stop(
     enable_audio: bool, 
     mut stop_rx: broadcast::Receiver<()>
 ) {
-    info!("Starting WebRTC H.264 streaming session with stop signal: monitor={}, audio={}", monitor, enable_audio);
+    info!("Starting WebRTC VP8 streaming session with stop signal: monitor={}, audio={}", monitor, enable_audio);
     
     tokio::select! {
         _ = handle_webrtc_socket(socket, monitor, enable_audio) => {

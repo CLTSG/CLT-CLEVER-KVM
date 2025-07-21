@@ -9,10 +9,11 @@
 <body>
     <!-- Main screen container -->
     <div id="screen">
-        <!-- For H.264 streaming -->
+        <!-- For VP8 streaming -->
         <video id="video-screen" autoplay playsinline muted></video>
         
-        <canvas id="canvas-layer"></canvas>
+        <!-- Canvas layer for input handling only (transparent overlay) -->
+        <canvas id="canvas-layer" style="position: absolute; top: 0; left: 0; pointer-events: auto; opacity: 0; z-index: 1;"></canvas>
         
         <!-- OSD Overlay -->
         <div class="osd-overlay">

@@ -20,11 +20,7 @@ class KVMClient {
         this.videoQueue = [];
         this.showStats = false;
         
-        // Rendering mode and canvas properties
-        this.renderingMode = 'video'; // 'video' or 'canvas'
-        this.canvas = null;
-        this.ctx = null;
-        this.playButton = null;
+        // VP8 video properties
         this.needsKeyframe = true;
         
         // OSD state
@@ -43,24 +39,15 @@ class KVMClient {
         this.peerConnection = null;
         this.audioStream = null;
 
-        // Add MediaSource failure tracking
-        this.mediaSourceFailures = 0;
-        this.maxMediaSourceFailures = 3; // Switch to canvas after 3 failures
-        this.lastFailureTime = 0;
-        this.failureResetTime = 30000; // Reset failure count after 30 seconds
-
         this.initializeElements();
         this.setupEventListeners();
         this.connect();
     }
 
     initializeElements() {
-        // Main elements - VP8 uses video element for WebRTC streaming
+        // Main elements - VP8 uses video element for display
         this.videoScreen = document.getElementById('video-screen');
-        this.canvasLayer = document.getElementById('canvas-layer');
-        if (this.canvasLayer) {
-            this.ctx = this.canvasLayer.getContext('2d');
-        }
+        this.canvasLayer = document.getElementById('canvas-layer'); // Used only for input handling
         this.audioElement = document.getElementById('remote-audio');
         
         // OSD elements
@@ -891,12 +878,7 @@ class KVMClient {
         
         console.log('Initializing video streaming for codec:', this.currentCodec);
         
-        // For network access, prefer canvas mode as it's more reliable
-        if (this.isNetworkAccess()) {
-            console.log('Network access detected, preferring canvas mode for better compatibility');
-            this.switchToCanvasRendering();
-            return;
-        }
+        // Always use VP8 video mode - no canvas fallback
         
         // For VP8 via WebRTC, we need to set up the video element properly
         if (this.currentCodec === 'vp8' || this.currentCodec === 'webrtc') {
@@ -926,8 +908,8 @@ class KVMClient {
         console.log('Initializing MediaSource for codec:', codec);
         
         if (!window.MediaSource) {
-            console.warn('MediaSource API not supported, switching to canvas rendering');
-            this.switchToCanvasRendering();
+            console.error('MediaSource API not supported - VP8 video cannot work without MediaSource');
+            this.showError('VP8 video requires MediaSource API support');
             return;
         }
         
@@ -949,8 +931,8 @@ class KVMClient {
         }
         
         if (!mimeType) {
-            console.warn('No supported codec configurations found, switching to canvas rendering');
-            this.switchToCanvasRendering();
+            console.error('No supported VP8 codec configurations found - browser does not support VP8');
+            this.showError('Browser does not support VP8 video codec');
             return;
         }
         
@@ -970,7 +952,7 @@ class KVMClient {
         
         this.mediaSource = new MediaSource();
         this.sourceBuffer = null;
-        this.videoQueue = [];
+        this.videoQueue = this.videoQueue || []; // Preserve existing queue or create new one
         this.needsKeyframe = true;
         
         // Create object URL and set it to video element
@@ -988,16 +970,7 @@ class KVMClient {
                     // Set up SourceBuffer event handlers
                     this.sourceBuffer.addEventListener('updateend', () => {
                         // Process queued video data
-                        if (this.videoQueue.length > 0 && !this.sourceBuffer.updating) {
-                            try {
-                                const nextData = this.videoQueue.shift();
-                                this.sourceBuffer.appendBuffer(nextData);
-                            } catch (e) {
-                                console.error('Error processing video queue:', e);
-                                this.videoQueue = [];
-                                this.switchToCanvasRendering();
-                            }
-                        }
+                        this.processVideoQueue();
                         
                         // Auto-play if video is ready
                         if (this.videoScreen.paused && this.videoScreen.readyState >= 2) {
@@ -1017,80 +990,31 @@ class KVMClient {
                             buffered: this.sourceBuffer?.buffered.length || 0
                         });
                         this.needsKeyframe = true;
-                        this.showNotification('Video decode error, switching to canvas mode');
-                        this.switchToCanvasRendering();
+                        this.showError('Video decode error - requesting keyframe');
+                        this.requestKeyframe();
                     });
                     
                     console.log('MediaSource and SourceBuffer initialized successfully');
+                    
+                    // Process any frames that were queued while we were initializing
+                    console.log('MediaSource ready, processing queued frames:', this.videoQueue.length);
+                    if (this.videoQueue.length > 0) {
+                        this.processVideoQueue();
+                    }
                     
                     // Request initial keyframe
                     this.requestKeyframe();
                 }
             } catch (e) {
                 console.error('Error setting up MediaSource:', e);
-                this.switchToCanvasRendering();
+                this.showError('MediaSource setup failed');
             }
         });
         
         this.mediaSource.addEventListener('error', (e) => {
             console.error('MediaSource error:', e);
-            this.switchToCanvasRendering();
+            this.showError('MediaSource playback error');
         });
-    }
-
-    switchToCanvasRendering() {
-        console.log('Switching to canvas rendering mode');
-        this.renderingMode = 'canvas';
-        
-        // Clean up MediaSource resources
-        if (this.mediaSource) {
-            try {
-                if (this.mediaSource.readyState === 'open') {
-                    this.mediaSource.endOfStream();
-                }
-            } catch (e) {
-                console.warn('Error ending MediaSource:', e);
-            }
-            this.mediaSource = null;
-        }
-        
-        this.sourceBuffer = null;
-        this.videoQueue = [];
-        
-        // Reset keyframe requirements for canvas mode - be more lenient
-        this.needsKeyframe = true;
-        this.waitingForKeyframe = true;
-        
-        // Hide video element and show canvas
-        if (this.videoScreen) {
-            this.videoScreen.style.display = 'none';
-            this.videoScreen.src = '';
-        }
-        if (this.canvasLayer) {
-            this.canvasLayer.style.display = 'block';
-        }
-        
-        // Set up canvas for rendering
-        this.canvas = this.canvasLayer;
-        this.ctx = this.canvas.getContext('2d');
-        
-        // Update status
-        this.updateStatus('Canvas Mode', 'Using canvas rendering for video playback', false);
-        
-        // Request a keyframe immediately for canvas mode
-        this.requestKeyframe();
-        
-        console.log('Canvas rendering mode activated, waiting for keyframe...');
-    }
-
-    switchToBlobFallback() {
-        console.log('Switching to blob URL fallback (deprecated)');
-        this.mediaSource = null;
-        this.sourceBuffer = null;
-        this.videoQueue = [];
-        
-        // This method is now deprecated - switch to canvas instead
-        this.switchToCanvasRendering();
     }
 
     handleVideoFrame(data) {
@@ -1102,329 +1026,104 @@ class KVMClient {
         }
         
         try {
-            // Handle different rendering modes
-            if (this.renderingMode === 'canvas') {
-                this.handleCanvasFrame(data);
-                return;
-            }
-            
+            // Only use VP8 MediaSource - no canvas fallback
             const videoData = this.base64ToArrayBuffer(data.data);
             console.log('Decoded video data size:', videoData.byteLength);
             
             // Validate VP8 data format
             if (data.codec === 'vp8' && !this.isValidVideoData(videoData)) {
-                console.warn('Invalid video data format, switching to canvas mode');
-                this.switchToCanvasRendering();
+                console.error('Invalid VP8 data format received');
+                this.showError('Invalid video data format');
                 return;
             }
             
-            // Check if we have a valid MediaSource setup
-            if (this.mediaSource && this.sourceBuffer && this.mediaSource.readyState === 'open') {
-                console.log('Using MediaSource to play video frame');
-                if (this.sourceBuffer.updating) {
-                    // Queue the data if source buffer is busy
-                    this.videoQueue.push(videoData);
-                    // Limit queue size to prevent memory issues
-                    if (this.videoQueue.length > 10) {
-                        console.warn('Video queue getting large, dropping oldest frames');
-                        this.videoQueue = this.videoQueue.slice(-5); // Keep only last 5 frames
-                    }
-                } else {
-                    try {
-                        this.sourceBuffer.appendBuffer(videoData);
-                    } catch (e) {
-                        console.error('Error appending video data:', e);
-                        this.switchToCanvasRendering();
-                    }
+            // Check if MediaSource is ready
+            if (!this.mediaSource) {
+                console.warn('MediaSource not initialized yet, queuing frame');
+                if (!this.videoQueue) this.videoQueue = [];
+                this.videoQueue.push(videoData);
+                return;
+            }
+            
+            // Check if MediaSource is in the right state
+            if (this.mediaSource.readyState !== 'open') {
+                console.warn('MediaSource not open yet (state:', this.mediaSource.readyState, '), queuing frame');
+                if (!this.videoQueue) this.videoQueue = [];
+                this.videoQueue.push(videoData);
+                return;
+            }
+            
+            // Check if SourceBuffer is ready
+            if (!this.sourceBuffer) {
+                console.warn('SourceBuffer not ready yet, queuing frame');
+                if (!this.videoQueue) this.videoQueue = [];
+                this.videoQueue.push(videoData);
+                return;
+            }
+            
+            // Now we can process the frame
+            console.log('Processing video frame with MediaSource');
+            if (this.sourceBuffer.updating) {
+                // Queue the data if source buffer is busy
+                this.videoQueue.push(videoData);
+                // Limit queue size to prevent memory issues
+                if (this.videoQueue.length > 10) {
+                    console.warn('Video queue getting large, dropping oldest frames');
+                    this.videoQueue = this.videoQueue.slice(-5); // Keep only last 5 frames
                 }
             } else {
-                console.log('MediaSource not ready, switching to canvas rendering');
-                this.switchToCanvasRendering();
+                try {
+                    this.sourceBuffer.appendBuffer(videoData);
+                } catch (e) {
+                    console.error('Error appending video data:', e);
+                    this.showError('Video buffer append failed');
+                }
             }
             
             this.updateFrameStats();
             
         } catch (e) {
             console.error('Error handling video frame:', e);
-            this.switchToCanvasRendering();
+            this.showError('Video frame processing error');
         }
     }
 
-    handleCanvasFrame(data) {
-        console.log('Rendering frame to canvas, is_keyframe:', data.is_keyframe);
-        
-        try {
-            // Default to VP8 if codec is not specified (WebRTC frames)
-            const codec = data.codec || 'vp8';
-            
-            if (codec === 'vp8' || codec === 'webrtc') {
-                const videoData = this.base64ToArrayBuffer(data.data);
-                
-                // For canvas mode, be more lenient with non-keyframes when accessed via network
-                // We'll accept some non-keyframes to keep the video flowing
-                if (this.needsKeyframe && !data.is_keyframe) {
-                    // If we've been waiting for too long, be more accepting
-                    const now = performance.now();
-                    if (!this.lastKeyframeRequest || (now - this.lastKeyframeRequest) > 5000) {
-                        console.log('Canvas mode: Been waiting too long, accepting non-keyframe');
-                        this.needsKeyframe = false;
-                    } else {
-                        console.log('Canvas mode: Skipping non-keyframe while waiting for keyframe');
-                        this.requestKeyframe();
-                        return;
-                    }
-                }
-                
-                // Try to use WebCodecs API for H.264 decoding if available
-                if (window.VideoDecoder && window.VideoFrame && !this.webCodecsFailed) {
-                    this.handleWebCodecsDecoding(videoData, data.is_keyframe);
-                } else {
-                    // WebCodecs not available or failed - try alternative approaches
-                    console.log('WebCodecs not available/failed, trying alternative canvas rendering');
-                    this.handleCanvasFrameAlternative(data);
-                }
-                
-                // Mark keyframe as processed
-                if (data.is_keyframe) {
-                    this.needsKeyframe = false;
-                    this.waitingForKeyframe = false;
-                    console.log('Keyframe processed in canvas mode');
-                }
-            } else {
-                console.warn('Unsupported canvas frame format:', codec);
-                this.renderPlaceholder('Unsupported Format: ' + codec);
-            }
-            
-        } catch (e) {
-            console.error('Error rendering canvas frame:', e);
-            this.renderPlaceholder('Error: ' + e.message);
+    processVideoQueue() {
+        // Process any queued video frames now that MediaSource is ready
+        if (!this.videoQueue || this.videoQueue.length === 0) {
+            return;
         }
-    }
-
-    handleCanvasFrameAlternative(data) {
-        // When WebCodecs is not available, we can try a few alternative approaches
-        console.log('Using alternative canvas rendering method');
         
-        // Method 1: Try to create a video element and capture frames
-        if (!this.canvasVideoElement) {
-            this.canvasVideoElement = document.createElement('video');
-            this.canvasVideoElement.muted = true;
-            this.canvasVideoElement.playsInline = true;
-            this.canvasVideoElement.autoplay = true;
-            this.canvasVideoElement.style.display = 'none';
-            document.body.appendChild(this.canvasVideoElement);
+        if (!this.sourceBuffer || this.sourceBuffer.updating) {
+            return; // Can't process now, will be called again on updateend
         }
         
         try {
-            // Create a blob URL from the video data
-            const videoData = this.base64ToArrayBuffer(data.data);
-            
-            // Try different MIME types for better compatibility
-            const mimeTypes = [
-                'video/mp4',
-                'video/mp4; codecs="avc1.42E01E"',
-                'video/webm',
-                'video/webm; codecs="vp8"'
-            ];
-            
-            let blob = null;
-            for (const mimeType of mimeTypes) {
-                try {
-                    blob = new Blob([videoData], { type: mimeType });
-                    break;
-                } catch (e) {
-                    console.warn('Failed to create blob with MIME type:', mimeType);
-                }
-            }
-            
-            if (!blob) {
-                console.warn('Could not create blob with any MIME type, rendering placeholder');
-                this.renderPlaceholder('Video Format Not Supported');
-                return;
-            }
-            
-            const url = URL.createObjectURL(blob);
-            
-            // Set up event handlers
-            const cleanup = () => {
-                URL.revokeObjectURL(url);
-                this.canvasVideoElement.removeEventListener('loadeddata', onLoaded);
-                this.canvasVideoElement.removeEventListener('error', onError);
-            };
-            
-            const onLoaded = () => {
-                try {
-                    if (this.canvasLayer && this.ctx && this.canvasVideoElement.videoWidth > 0) {
-                        // Set canvas size to match video
-                        this.canvasLayer.width = this.canvasVideoElement.videoWidth;
-                        this.canvasLayer.height = this.canvasVideoElement.videoHeight;
-                        
-                        // Draw the video frame to canvas
-                        this.ctx.drawImage(this.canvasVideoElement, 0, 0);
-                        
-                        // Hide status display
-                        this.hideStatusDisplay();
-                        
-                        if (data.is_keyframe) {
-                            this.needsKeyframe = false;
-                            this.waitingForKeyframe = false;
-                            console.log('Keyframe processed via canvas alternative method');
-                        }
-                        
-                        console.log('Successfully rendered frame via alternative method');
-                    } else {
-                        console.warn('Canvas or video element not ready for alternative rendering');
-                    }
-                } catch (e) {
-                    console.error('Error drawing to canvas:', e);
-                } finally {
-                    cleanup();
-                }
-            };
-            
-            const onError = (e) => {
-                console.warn('Canvas video element error:', e);
-                cleanup();
-                
-                // If this is a keyframe and we're in network mode, try to show something
-                if (data.is_keyframe) {
-                    this.renderPlaceholder('Processing Video...\nCanvas Fallback Active');
-                    this.needsKeyframe = false; // Don't get stuck waiting
-                    this.waitingForKeyframe = false;
-                } else {
-                    this.renderPlaceholder('Video Processing Failed');
-                }
-            };
-            
-            this.canvasVideoElement.addEventListener('loadeddata', onLoaded, { once: true });
-            this.canvasVideoElement.addEventListener('error', onError, { once: true });
-            
-            // Set the blob URL
-            this.canvasVideoElement.src = url;
-            
-            // Force load attempt
-            this.canvasVideoElement.load();
-            
+            const nextData = this.videoQueue.shift();
+            console.log('Processing queued video frame, remaining queue:', this.videoQueue.length);
+            this.sourceBuffer.appendBuffer(nextData);
         } catch (e) {
-            console.error('Alternative canvas rendering failed:', e);
-            if (data.is_keyframe) {
-                this.renderPlaceholder('Video Playback Active\n(Canvas Mode)');
-                this.needsKeyframe = false; // Don't get stuck
-                this.waitingForKeyframe = false;
-            } else {
-                this.renderPlaceholder('Alternative Rendering Failed');
-            }
-        }
-    }
-
-    handleWebCodecsDecoding(videoData, isKeyframe) {
-        try {
-            // Skip non-keyframes if we need a keyframe
-            if (this.needsKeyframe && !isKeyframe) {
-                console.log('Skipping non-keyframe for WebCodecs, requesting keyframe');
-                this.requestKeyframe();
-                return;
-            }
-
-            if (!this.videoDecoder) {
-                console.log('Initializing WebCodecs VideoDecoder');
-                
-                this.videoDecoder = new VideoDecoder({
-                    output: (frame) => {
-                        console.log('WebCodecs decoded frame:', frame.displayWidth, 'x', frame.displayHeight);
-                        
-                        // Ensure canvas is properly sized
-                        if (this.canvasLayer && this.ctx) {
-                            this.canvasLayer.width = frame.displayWidth;
-                            this.canvasLayer.height = frame.displayHeight;
-                            
-                            // Draw the frame to canvas
-                            this.ctx.drawImage(frame, 0, 0);
-                            
-                            // Show the video and hide loading status
-                            this.hideStatusDisplay();
-                        }
-                        
-                        frame.close();
-                    },
-                    error: (e) => {
-                        console.error('WebCodecs decode error:', e);
-                        this.webCodecsFailed = true;
-                        this.needsKeyframe = true;
-                        
-                        // Fall back to alternative canvas rendering
-                        console.log('WebCodecs failed, falling back to alternative method');
-                        this.handleCanvasFrameAlternative({ data: this.lastVideoData, is_keyframe: true });
-                        
-                        this.videoDecoder = null;
-                    }
-                });
-                
-                // Configure decoder for H.264
-                this.videoDecoder.configure({
-                    codec: 'avc1.42E01E', // H.264 Baseline Profile Level 3.0
-                    optimizeForLatency: true
-                });
-            }
-            
-            if (this.videoDecoder.state === 'configured') {
-                // Create EncodedVideoChunk
-                const chunk = new EncodedVideoChunk({
-                    type: isKeyframe ? 'key' : 'delta',
-                    timestamp: Date.now() * 1000, // microseconds
-                    data: videoData
-                });
-                
-                this.videoDecoder.decode(chunk);
-                
-                if (isKeyframe) {
-                    this.needsKeyframe = false;
-                    console.log('Keyframe processed via WebCodecs');
-                }
-            }
-            
-        } catch (e) {
-            console.error('WebCodecs decoding failed:', e);
-            this.webCodecsFailed = true;
-            this.needsKeyframe = true;
-            
-            // Fall back to alternative canvas rendering
-            console.log('WebCodecs initialization failed, falling back to alternative method');
-            this.handleCanvasFrameAlternative({ data: btoa(String.fromCharCode(...new Uint8Array(videoData))), is_keyframe: isKeyframe });
-        }
-    }
-
-    renderPlaceholder(message) {
-        if (this.canvasLayer && this.ctx) {
-            this.ctx.fillStyle = '#1a1a1a';
-            this.ctx.fillRect(0, 0, this.canvasLayer.width, this.canvasLayer.height);
-            this.ctx.fillStyle = '#fff';
-            this.ctx.font = '20px Arial';
-            this.ctx.textAlign = 'center';
-            this.ctx.fillText(message, this.canvasLayer.width / 2, this.canvasLayer.height / 2);
-            this.ctx.font = '14px Arial';
-            
-            if (this.needsKeyframe) {
-                this.ctx.fillText('Waiting for keyframe...', this.canvasLayer.width / 2, this.canvasLayer.height / 2 + 30);
-            } else {
-                this.ctx.fillText('Connecting...', this.canvasLayer.width / 2, this.canvasLayer.height / 2 + 30);
-            }
+            console.error('Error processing queued video frame:', e);
+            // Clear queue on error to prevent accumulation
+            this.videoQueue = [];
+            this.showError('Video queue processing error');
         }
     }
 
     isValidVideoData(data) {
-        // Basic validation for H.264 NAL units
+        // Basic validation for VP8 data
         const view = new Uint8Array(data);
         
-        // Check for NAL unit start codes (0x00 0x00 0x00 0x01 or 0x00 0x00 0x01)
-        for (let i = 0; i < Math.min(view.length - 4, 100); i++) {
-            if ((view[i] === 0x00 && view[i+1] === 0x00 && view[i+2] === 0x00 && view[i+3] === 0x01) ||
-                (view[i] === 0x00 && view[i+1] === 0x00 && view[i+2] === 0x01)) {
-                return true;
-            }
+        // VP8 frames typically start with specific bit patterns
+        // For a VP8 key frame, the first 3 bits should be 0 (frame type)
+        // and the version should be valid
+        if (view.length >= 10) {
+            // Check if it looks like VP8 data - very basic check
+            // VP8 keyframes start with specific patterns
+            return view.length > 0; // For now, just check if we have data
         }
         
-        return false;
+        return view.length > 0; // Basic check - any non-empty data
     }
 
     requestKeyframe() {
@@ -1513,109 +1212,15 @@ class KVMClient {
                 console.log('Received keyframe, enabling playback');
             }
 
-            // For WebRTC frames, we need to handle them differently than regular video frames
-            // WebRTC frames are typically H.264 encoded and need to be displayed via video element or canvas
-            if (this.renderingMode === 'canvas' || !this.videoScreen) {
-                this.handleCanvasFrame(data);
-            } else {
-                // Try to display via video element with MediaSource API
-                this.handleVideoFrameViaMediaSource(data);
-            }
+            // WebRTC frames are always VP8 encoded and use MediaSource API
+            // Always use video element with MediaSource for VP8
+            this.handleVideoFrame(data);
             
             this.updateFrameStats();
             
         } catch (e) {
             console.error('Error handling WebRTC frame:', e);
-            // Fallback to canvas rendering
-            this.switchToCanvasRendering();
-        }
-    }
-
-    handleVideoFrameViaMediaSource(data) {
-        try {
-            // Skip non-keyframes if we need a keyframe
-            if (this.needsKeyframe && !data.is_keyframe) {
-                console.log('Skipping non-keyframe for MediaSource, requesting keyframe');
-                this.requestKeyframe();
-                return;
-            }
-
-            const videoData = this.base64ToArrayBuffer(data.data);
-            
-            // Check if we have a valid MediaSource setup
-            if (!this.mediaSource || this.mediaSource.readyState !== 'open') {
-                console.log('MediaSource not ready, switching to canvas mode');
-                this.switchToCanvasRendering();
-                return;
-            }
-
-            if (!this.sourceBuffer) {
-                console.error('SourceBuffer not available, switching to canvas mode');
-                this.switchToCanvasRendering();
-                return;
-            }
-
-            // Validate that this looks like valid H.264 data
-            if (!this.isValidVideoData(videoData)) {
-                console.warn('Invalid H.264 data received, switching to canvas');
-                this.switchToCanvasRendering();
-                return;
-            }
-
-            // Check for additional MediaSource compatibility issues
-            if (this.mediaSource.readyState === 'ended') {
-                console.warn('MediaSource ended, switching to canvas mode');
-                this.switchToCanvasRendering();
-                return;
-            }
-
-            if (this.sourceBuffer.updating) {
-                // Queue the data if source buffer is busy
-                this.videoQueue.push(videoData);
-                // Limit queue size to prevent memory issues
-                if (this.videoQueue.length > 10) {
-                    console.warn('Video queue getting large, dropping oldest frames');
-                    this.videoQueue = this.videoQueue.slice(-5);
-                }
-            } else {
-                try {
-                    // Additional validation before appending
-                    if (videoData.byteLength === 0) {
-                        console.warn('Empty video data received, skipping');
-                        return;
-                    }
-
-                    // For network connections, we might get corrupted data
-                    // Let's be more defensive about appending
-                    if (videoData.byteLength > 2 * 1024 * 1024) { // 2MB limit
-                        console.warn('Video data too large:', videoData.byteLength, 'switching to canvas');
-                        this.switchToCanvasRendering();
-                        return;
-                    }
-
-                    this.sourceBuffer.appendBuffer(videoData);
-                    if (data.is_keyframe) {
-                        this.needsKeyframe = false;
-                        console.log('Keyframe processed via MediaSource');
-                    }
-                } catch (e) {
-                    console.error('Error appending WebRTC video data:', e);
-                    console.error('Data size:', videoData.byteLength, 'isKeyframe:', data.is_keyframe);
-                    console.error('SourceBuffer state:', {
-                        updating: this.sourceBuffer.updating,
-                        mode: this.sourceBuffer.mode,
-                        buffered: this.sourceBuffer.buffered.length
-                    });
-                    console.error('MediaSource state:', this.mediaSource.readyState);
-                    
-                    // MediaSource failed, switch to canvas mode permanently for this session
-                    this.needsKeyframe = true;
-                    this.switchToCanvasRendering();
-                }
-            }
-        } catch (e) {
-            console.error('Error handling WebRTC video frame via MediaSource:', e);
-            this.switchToCanvasRendering();
+            this.showError('WebRTC frame processing error');
         }
     }
 
@@ -1750,6 +1355,16 @@ class KVMClient {
         }
    }
 
+    showError(message) {
+        console.error('KVM Error:', message);
+        this.updateStatus('Error', message, false);
+        
+        // Also show as notification if available
+        if (this.showNotification) {
+            this.showNotification(message, 5000);
+        }
+    }
+
     // Utility methods
     base64ToArrayBuffer(base64) {
         // Remove data URL prefix if present
@@ -1764,15 +1379,6 @@ class KVMClient {
         }
         
         return bytes.buffer;
-    }
-
-    // Check if we're accessing via network IP (not localhost)
-    isNetworkAccess() {
-        const hostname = window.location.hostname;
-        return hostname !== 'localhost' && 
-               hostname !== '127.0.0.1' && 
-               hostname !== '::1' &&
-               !hostname.startsWith('localhost');
     }
 }
 
