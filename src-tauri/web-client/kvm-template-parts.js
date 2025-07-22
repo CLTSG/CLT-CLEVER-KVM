@@ -36,17 +36,19 @@ class TemplateInitializer {
     }
     
     static initializeDropdowns(config) {
-        // Initialize codec dropdown
-        const codecDropdown = document.getElementById('codec-dropdown');
-        if (codecDropdown) {
-            codecDropdown.value = config.codec;
-        }
-        
         // Initialize monitor dropdown (will be populated by server data)
         const monitorDropdown = document.getElementById('monitor-dropdown');
         if (monitorDropdown) {
             // This will be updated when server info is received
-            monitorDropdown.innerHTML = '<option value="loading">Loading monitors...</option>';
+            monitorDropdown.innerHTML = '<option value="0">Primary Monitor</option>';
+        }
+        
+        // Initialize codec dropdown with correct value
+        const codecDropdown = document.getElementById('codec-dropdown');
+        if (codecDropdown && config.codec) {
+            // Map codec values to dropdown options
+            const codecValue = config.codec === 'vp8' ? 'vp8' : 'vp8'; // Only VP8 is supported now
+            codecDropdown.value = codecValue;
         }
     }
     

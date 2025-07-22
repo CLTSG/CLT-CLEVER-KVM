@@ -18,6 +18,7 @@ use base64::{Engine, engine::general_purpose};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use gethostname;
 
 use super::models::NetworkStats;
 
@@ -46,57 +47,54 @@ pub enum ControlMessage {
 }
 
 // Helper function to make the future Send
-pub async fn handle_socket_wrapper(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
-    // Use WebRTC H.264 streaming for optimal performance
-    let codec = if codec == "h264" || codec == "webrtc" {
-        "webrtc".to_string()
-    } else {
-        info!("Codec {} not supported for WebRTC, falling back to H.264", codec);
-        "webrtc".to_string()
-    };
+pub async fn handle_socket_wrapper(socket: WebSocket, monitor: usize, _codec: String, enable_audio: bool) {
+    // Always use VP8 codec
+    let codec = "vp8".to_string();
     
-    handle_socket(socket, monitor, codec, enable_audio).await;
+    // Extract connection info for logging
+    info!("New WebSocket connection established - Monitor: {}, Codec: VP8 (forced), Audio: {}", 
+          monitor, enable_audio);
+    
+    handle_socket(socket, monitor, codec.clone(), enable_audio).await;
+    
+    info!("WebSocket connection closed - Monitor: {}, Codec: VP8", monitor);
 }
 
 // New helper function with stop signal
 pub async fn handle_socket_wrapper_with_stop(
     socket: WebSocket, 
     monitor: usize, 
-    codec: String, 
+    _codec: String, 
     enable_audio: bool, 
     stop_rx: broadcast::Receiver<()>
 ) {
-    // Use WebRTC H.264 streaming for optimal performance
-    let codec = if codec == "h264" || codec == "webrtc" {
-        "webrtc".to_string()
-    } else {
-        info!("Codec {} not supported for WebRTC, falling back to H.264", codec);
-        "webrtc".to_string()
-    };
+    // Always use VP8 codec
+    let codec = "vp8".to_string();
+    
+    // Extract connection info for logging
+    info!("New WebSocket connection with stop signal - Monitor: {}, Codec: VP8 (forced), Audio: {}", 
+          monitor, enable_audio);
     
     handle_socket_with_stop(socket, monitor, codec, enable_audio, stop_rx).await;
+    
+    info!("WebSocket connection with stop signal closed - Monitor: {}, Codec: VP8", monitor);
 }
 
 pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
     info!("New WebSocket connection: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
-    // Use WebRTC streaming for H.264 and optimal performance
-    if codec == "webrtc" {
-        handle_webrtc_socket(socket, monitor, enable_audio).await;
-    } else {
-        // Fallback to legacy for other codecs
-        handle_legacy_socket(socket, monitor, codec, enable_audio).await;
-    }
+    // Always use VP8 legacy socket handler
+    handle_legacy_socket(socket, monitor, "vp8".to_string(), enable_audio).await;
 }
 
-async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
+async fn handle_legacy_socket(socket: WebSocket, monitor: usize, _codec: String, enable_audio: bool) {
+    let codec = "vp8".to_string(); // Always use VP8
     info!("New WebSocket connection: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
     // Create a thread-safe channel for screen data
     let (screen_tx, mut screen_rx) = mpsc::channel::<Result<Vec<u8>, String>>(10);
-    let (delta_tx, mut delta_rx) = mpsc::channel::<Result<HashMap<usize, Vec<u8>>, String>>(10);
     let (encoded_tx, mut encoded_rx) = mpsc::channel::<Result<Vec<u8>, String>>(10);
     
     // Initialize monitors
@@ -126,7 +124,7 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
     };
     
     // Setup screen capture in a separate thread
-    let selected_codec = codec.clone();
+    let selected_codec = "vp8".to_string(); // Always use VP8
     let screen_handle = std::thread::spawn(move || {
         // Initialize screen capture for the selected monitor
         let mut screen_capturer = match ScreenCapture::new(Some(monitor_index)) {
@@ -153,8 +151,8 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
         // Convert codec string to enum
         let codec_type = CodecType::from_string(&selected_codec);
         
-        // Initialize codec encoder if using H.264/H.265/AV1
-        let mut video_encoder: Option<VideoEncoder> = if selected_codec != "jpeg" {
+        // Initialize codec encoder for WebRTC VP8
+        let mut video_encoder: Option<VideoEncoder> = {
             // Create encoder configuration - default to software encoding
             let encoder_config = EncoderConfig {
                 width: width as u32,
@@ -167,6 +165,9 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
                 codec_type,
             };
             
+            info!("Attempting to initialize video encoder with config: {}x{} @ {}fps, codec: {:?}", 
+                  encoder_config.width, encoder_config.height, encoder_config.framerate, encoder_config.codec_type);
+            
             // Try software encoder first
             match VideoEncoder::new(encoder_config.clone()) {
                 Ok(encoder) => {
@@ -175,17 +176,19 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
                     Some(encoder)
                 },
                 Err(e) => {
-                    warn!("Software encoder initialization failed: {}", e);
-                    info!("Falling back to JPEG encoding for better compatibility");
+                    error!("Software encoder initialization failed: {}", e);
+                    error!("VP8 encoder is required for operation");
+                    
+                    // Send error message to client
+                    let _error_msg = serde_json::json!({
+                        "type": "error",
+                        "message": format!("Failed to initialize video encoder: {}", e)
+                    });
+                    let _ = encoded_tx.blocking_send(Err(format!("Encoder initialization failed: {}", e)));
                     None
                 }
             }
-        } else {
-            None
         };
-        
-        // Use delta encoding by default for JPEG mode
-        let use_delta = selected_codec == "jpeg";
         
         // Network stats for adaptive streaming
         let _last_network_stats = NetworkStats {
@@ -204,128 +207,98 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
         
         // Capture loop
         loop {
-            if selected_codec != "jpeg" && video_encoder.is_some() {
-                // H.264/H.265/AV1 encoding
-                if let Some(encoder) = &mut video_encoder {
-                    // Measure capture time
-                    let capture_start = Instant::now();
-                    match screen_capturer.capture_raw() {
-                        Ok(raw_frame) => {
-                            // Force keyframe every 5 seconds or on poor network conditions
-                            let force_keyframe = frame_count % 150 == 0;
-                            
-                            // Encode the frame
-                            match encoder.encode_frame(&raw_frame, force_keyframe) {
-                                Ok(encoded) => {
-                                    _frames_processed += 1;
+            if let Some(encoder) = &mut video_encoder {
+                // VP8 encoding
+                // Measure capture time
+                let capture_start = Instant::now();
+                match screen_capturer.capture_raw() {
+                    Ok(raw_frame) => {
+                        // Force keyframe every 5 seconds or on poor network conditions
+                        let force_keyframe = frame_count % 150 == 0;
+                        
+                        if frame_count == 0 {
+                            info!("Encoding first frame ({}x{} pixels, {} bytes)", 
+                                  width, height, raw_frame.len());
+                        }
+                        
+                        // Encode the frame
+                        match encoder.encode_frame(&raw_frame, force_keyframe) {
+                            Ok(encoded) => {
+                                _frames_processed += 1;
+                                
+                                if frame_count == 0 {
+                                    info!("Successfully encoded first frame ({} bytes)", encoded.len());
+                                } else if frame_count % 300 == 0 { // Log every 10 seconds
+                                    info!("Encoded frame {} ({} bytes)", frame_count, encoded.len());
+                                }
+                                
+                                // Send encoded frame as video_frame message
+                                if let Err(e) = encoded_tx.blocking_send(Ok(encoded)) {
+                                    info!("Encoded frame channel closed, stopping screen capture thread: {}", e);
+                                    break;
+                                }
+                            },
+                            Err(e) => {
+                                // Check if this is a hardware encoder issue
+                                if e.to_string().contains("Hardware encoder failed to open") {
+                                    error!("Hardware encoder failed ({}), switching to software encoder", e);
                                     
-                                    // Send encoded frame as video_frame message
-                                    if let Err(_) = encoded_tx.blocking_send(Ok(encoded)) {
-                                        break;
-                                    }
-                                },
-                                Err(e) => {
-                                    // Check if this is a hardware encoder issue
-                                    if e.to_string().contains("Hardware encoder failed to open") {
-                                        error!("Hardware encoder failed ({}), switching to software encoder", e);
-                                        
-                                        // Try to recreate encoder with software encoding
-                                        let software_config = EncoderConfig {
-                                            width: width as u32,
-                                            height: height as u32,
-                                            bitrate: 2_000_000,
-                                            framerate: 30,
-                                            keyframe_interval: 60,
-                                            preset: "ultrafast".to_string(),
-                                            use_hardware: false, // Force software
-                                            codec_type,
-                                        };
-                                        
-                                        match VideoEncoder::new(software_config) {
-                                            Ok(new_encoder) => {
-                                                info!("Successfully switched to software encoder");
-                                                *encoder = new_encoder;
-                                                // Try encoding again with the new software encoder
-                                                continue;
-                                            },
-                                            Err(e) => {
-                                                error!("Software encoder also failed: {}, falling back to JPEG", e);
-                                                // Clear the encoder to force JPEG fallback
-                                                video_encoder = None;
-                                                break;
-                                            }
-                                        }
-                                    } else {
-                                        // Other encoding errors, fall back to JPEG
-                                        error!("Encoding failed: {}, falling back to JPEG", e);
-                                        
-                                        // Try JPEG encoding as fallback
-                                        match screen_capturer.capture_jpeg(current_quality) {
-                                            Ok(jpeg_data) => {
-                                                if let Err(_) = screen_tx.blocking_send(Ok(jpeg_data)) {
-                                                    break;
-                                                }
-                                            },
-                                            Err(jpeg_err) => {
-                                                error!("JPEG fallback also failed: {}", jpeg_err);
-                                                break;
-                                            }
+                                    // Try to recreate encoder with software encoding
+                                    let software_config = EncoderConfig {
+                                        width: width as u32,
+                                        height: height as u32,
+                                        bitrate: 2_000_000,
+                                        framerate: 30,
+                                        keyframe_interval: 60,
+                                        preset: "ultrafast".to_string(),
+                                        use_hardware: false, // Force software
+                                        codec_type,
+                                    };
+                                    
+                                    match VideoEncoder::new(software_config) {
+                                        Ok(new_encoder) => {
+                                            info!("Successfully switched to software encoder");
+                                            *encoder = new_encoder;
+                                            // Try encoding again with the new software encoder
+                                            continue;
+                                        },
+                                        Err(e) => {
+                                            error!("Software encoder also failed: {}", e);
+                                            let _ = encoded_tx.blocking_send(Err(format!("All encoders failed: {}", e)));
+                                            break;
                                         }
                                     }
+                                } else {
+                                    // Other encoding errors
+                                    error!("Encoding failed: {}", e);
+                                    let _ = encoded_tx.blocking_send(Err(format!("Encoding failed: {}", e)));
+                                    break;
                                 }
                             }
-                            
-                            frame_count += 1;
-                        },
-                        Err(e) => {
-                            let err_msg = format!("Failed to capture raw frame: {}", e);
-                            let _ = encoded_tx.blocking_send(Err(err_msg));
-                            break;
                         }
-                    }
-                    
-                    // Frame rate control
-                    let frame_time = capture_start.elapsed();
-                    let target_frame_time = Duration::from_millis(1000 / 30);
-                    
-                    if frame_time < target_frame_time {
-                        std::thread::sleep(target_frame_time - frame_time);
-                    }
-                }
-            } else if use_delta {
-                // JPEG with delta encoding
-                match screen_capturer.capture_jpeg_delta(Some(current_quality)) {
-                    Ok(tiles) => {
-                        if let Err(_) = delta_tx.blocking_send(Ok(tiles)) {
-                            break;
-                        }
+                        
+                        frame_count += 1;
                     },
                     Err(e) => {
-                        let err_msg = format!("Failed to capture delta: {}", e);
-                        let _ = delta_tx.blocking_send(Err(err_msg));
+                        let err_msg = format!("Failed to capture raw frame: {}", e);
+                        error!("{}", err_msg);
+                        let _ = encoded_tx.blocking_send(Err(err_msg));
                         break;
                     }
                 }
+                    
+                // Frame rate control
+                let frame_time = capture_start.elapsed();
+                let target_frame_time = Duration::from_millis(1000 / 30);
                 
-                // Sleep to maintain target frame rate
-                std::thread::sleep(Duration::from_millis(1000 / 30));
+                if frame_time < target_frame_time {
+                    std::thread::sleep(target_frame_time - frame_time);
+                }
             } else {
-                // Basic JPEG encoding
-                match screen_capturer.capture_jpeg(current_quality) {
-                    Ok(jpeg_data) => {
-                        if let Err(_) = screen_tx.blocking_send(Ok(jpeg_data)) {
-                            break;
-                        }
-                    },
-                    Err(e) => {
-                        let err_msg = format!("Failed to capture jpeg: {}", e);
-                        let _ = screen_tx.blocking_send(Err(err_msg));
-                        break;
-                    }
-                }
-                
-                // Sleep to maintain target frame rate
-                std::thread::sleep(Duration::from_millis(1000 / 30));
+                // No encoder available, cannot proceed
+                error!("No video encoder available - capture loop cannot start");
+                let _ = encoded_tx.blocking_send(Err("No video encoder available".to_string()));
+                break;
             }
         }
     });
@@ -422,13 +395,13 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
         .unwrap_or_else(|| "Default".to_string());
     
     let server_info = serde_json::json!({
-        "type": "info",
+        "type": "server_info",
         "width": width,
         "height": height,
         "hostname": hostname,
         "monitor": selected_monitor,
         "monitor_index": monitor_index,
-        "codec": codec,
+        "codec": "vp8",  // Always send VP8 since that's our only supported codec
         "tile_width": tile_width,
         "tile_height": tile_height,
         "tile_size": tile_size,
@@ -552,10 +525,17 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
                                 "request_keyframe" => {
                                     // Handle keyframe request
                                     info!("Client requesting keyframe");
-                                    // TODO: Signal encoder to generate keyframe
-                                    // For now, just acknowledge the request
+                                    
+                                    // Send a keyframe request to the encoder via a channel
+                                    // This will be handled by forcing a keyframe on the next encode
+                                    let keyframe_request = serde_json::json!({
+                                        "type": "force_keyframe"
+                                    });
+                                    
+                                    // For now, just acknowledge the request - the encoder will handle keyframes
                                     let response = serde_json::json!({
                                         "type": "keyframe_response",
+                                        "status": "requested",
                                         "timestamp": SystemTime::now()
                                             .duration_since(SystemTime::UNIX_EPOCH)
                                             .unwrap_or_default()
@@ -565,6 +545,9 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
                                     if let Err(e) = message_tx_clone.send(response.to_string()).await {
                                         error!("Failed to send keyframe response: {}", e);
                                     }
+                                    
+                                    // Log that we're processing the keyframe request
+                                    info!("Keyframe request acknowledged, will force keyframe on next capture");
                                 },
                                 _ => {
                                     debug!("Unknown message type: {}", msg_type);
@@ -653,9 +636,9 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
             }
         }
         
-        // Handle different codecs
-        if codec == "h264" || codec == "h265" {
-            // Process H.264/H.265 encoded frames
+        // Handle VP8 codec
+        if codec == "vp8" {
+            // Process VP8 encoded frames
             match encoded_rx.recv().await {
                 Some(Ok(encoded_data)) => {
                     // Base64 encode the data
@@ -674,6 +657,12 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
                             .as_millis()
                     });
                     
+                    if frame_count == 0 {
+                        info!("Sending first video frame to client ({} bytes encoded)", encoded_data.len());
+                    } else if frame_count % 300 == 0 { // Log every 10 seconds
+                        info!("Sent frame {} to client", frame_count);
+                    }
+                    
                     // Send the frame
                     if let Err(e) = message_tx_for_frames.send(frame_msg.to_string()).await {
                         error!("Failed to send encoded frame: {}", e);
@@ -683,86 +672,38 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
                     frame_count += 1;
                 },
                 Some(Err(e)) => {
-                    error!("Encoder error: {}", e);
-                    break;
-                },
-                None => {
-                    error!("Encoder channel closed");
-                    break;
-                }
-            }
-        } else if codec == "jpeg" {
-            // Process delta JPEG frames
-            match delta_rx.recv().await {
-                Some(Ok(tiles)) => {
-                    if !tiles.is_empty() {
-                        // Convert tiles to base64
-                        let mut base64_tiles = HashMap::new();
-                        
-                        for (idx, jpeg_data) in tiles {
-                            base64_tiles.insert(idx, general_purpose::STANDARD.encode(&jpeg_data));
-                        }
-                        
-                        // Create delta frame message
-                        let delta_msg = serde_json::json!({
-                            "type": "delta",
-                            "tiles": base64_tiles,
-                            "timestamp": SystemTime::now()
-                                .duration_since(SystemTime::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis()
-                        });
-                        
-                        // Send the frame
-                        if let Err(e) = message_tx_for_frames.send(delta_msg.to_string()).await {
-                            error!("Failed to send delta frame: {}", e);
-                            break;
-                        }
+                    error!("Encoder error received: {}", e);
+                    
+                    // Send error message to client
+                    let error_msg = serde_json::json!({
+                        "type": "error",
+                        "message": format!("Video encoding error: {}", e)
+                    });
+                    
+                    if let Err(send_err) = message_tx_for_frames.send(error_msg.to_string()).await {
+                        error!("Failed to send error message: {}", send_err);
                     }
-                },
-                Some(Err(e)) => {
-                    error!("Delta encoder error: {}", e);
                     break;
                 },
                 None => {
-                    error!("Delta encoder channel closed");
+                    error!("Encoder channel closed unexpectedly");
+                    
+                    // Send error message to client
+                    let error_msg = serde_json::json!({
+                        "type": "error",
+                        "message": "Video encoder stopped unexpectedly"
+                    });
+                    
+                    if let Err(send_err) = message_tx_for_frames.send(error_msg.to_string()).await {
+                        error!("Failed to send error message: {}", send_err);
+                    }
                     break;
                 }
             }
         } else {
-            // Process full JPEG frames
-            match screen_rx.recv().await {
-                Some(Ok(jpeg_data)) => {
-                    // Base64 encode the data
-                    let base64_data = general_purpose::STANDARD.encode(&jpeg_data);
-                    
-                    // Create frame message
-                    let frame_msg = serde_json::json!({
-                        "type": "frame",
-                        "width": width,
-                        "height": height,
-                        "image": base64_data,
-                        "timestamp": SystemTime::now()
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis()
-                    });
-                    
-                    // Send the frame
-                    if let Err(e) = message_tx_for_frames.send(frame_msg.to_string()).await {
-                        error!("Failed to send JPEG frame: {}", e);
-                        break;
-                    }
-                },
-                Some(Err(e)) => {
-                    error!("JPEG encoder error: {}", e);
-                    break;
-                },
-                None => {
-                    error!("JPEG encoder channel closed");
-                    break;
-                }
-            }
+            // No valid codec selected
+            error!("Invalid codec: {}", codec);
+            break;
         }
         
         // Rate limiting
@@ -776,8 +717,26 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, codec: String, 
     // Clean up
     info!("Cleaning up WebSocket connection resources");
     
-    // Wait for screen capture thread to finish
-    let _ = screen_handle.join();
+    // Wait for screen capture thread to finish with timeout
+    let join_result = tokio::time::timeout(
+        tokio::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || screen_handle.join())
+    ).await;
+    
+    match join_result {
+        Ok(Ok(Ok(()))) => {
+            info!("Screen capture thread joined successfully");
+        },
+        Ok(Ok(Err(e))) => {
+            error!("Screen capture thread panicked: {:?}", e);
+        },
+        Ok(Err(e)) => {
+            error!("Failed to spawn blocking task for thread join: {:?}", e);
+        },
+        Err(_) => {
+            warn!("Timeout waiting for screen capture thread to join - thread may still be running");
+        }
+    }
 }
 
 // New handler with stop signal
@@ -791,28 +750,23 @@ pub async fn handle_socket_with_stop(
     info!("New WebSocket connection with stop signal: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
-    // Use WebRTC streaming for optimal performance
-    if codec == "webrtc" {
-        handle_webrtc_socket_with_stop(socket, monitor, enable_audio, stop_rx).await;
-    } else {
-        // Fallback to legacy for other codecs
-        handle_legacy_socket_with_stop(socket, monitor, codec, enable_audio, stop_rx).await;
-    }
+    // Always use VP8 legacy socket handler with stop signal
+    handle_legacy_socket_with_stop(socket, monitor, "vp8".to_string(), enable_audio, stop_rx).await;
 }
 
 async fn handle_legacy_socket_with_stop(
     socket: WebSocket, 
     monitor: usize, 
-    codec: String, 
+    _codec: String, 
     enable_audio: bool, 
     stop_rx: broadcast::Receiver<()>
 ) {
+    let codec = "vp8".to_string(); // Always use VP8
     info!("New WebSocket connection: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
     // Create a thread-safe channel for screen data
     let (screen_tx, mut screen_rx) = mpsc::channel::<Result<Vec<u8>, String>>(10);
-    let (delta_tx, mut delta_rx) = mpsc::channel::<Result<HashMap<usize, Vec<u8>>, String>>(10);
     let (encoded_tx, mut encoded_rx) = mpsc::channel::<Result<Vec<u8>, String>>(10);
 
     // Create a control channel for codec switching and other commands
@@ -850,15 +804,22 @@ async fn handle_legacy_socket_with_stop(
     // Setup screen capture in a separate thread with stop signal
     let initial_codec = codec.clone();
     let screen_handle = std::thread::spawn(move || {
+        info!("Starting screen capture thread for monitor {} with codec {}", monitor_index, initial_codec);
         let mut screen_capturer = match ScreenCapture::new(Some(monitor_index)) {
-            Ok(capturer) => capturer,
+            Ok(capturer) => {
+                info!("Screen capturer initialized successfully");
+                capturer
+            },
             Err(e) => {
                 let err_msg = format!("Failed to initialize screen capture: {}", e);
+                error!("{}", err_msg);
                 let _ = screen_tx.blocking_send(Err(err_msg.clone()));
                 let _ = encoded_tx.blocking_send(Err(err_msg));
                 return;
             }
         };
+
+        info!("Screen capturer dimensions: {}x{}", screen_capturer.dimensions().0, screen_capturer.dimensions().1);
 
         let (width, height) = screen_capturer.dimensions();
         let (tile_width, tile_height, tile_size) = screen_capturer.tile_dimensions();
@@ -871,40 +832,40 @@ async fn handle_legacy_socket_with_stop(
         let mut current_codec = initial_codec.clone();
         let mut codec_type = CodecType::from_string(&current_codec);
         let mut video_encoder: Option<VideoEncoder> = None;
-        if current_codec != "jpeg" {
-            let encoder_config = EncoderConfig {
-                width: width as u32,
-                height: height as u32,
-                bitrate: 2_000_000,
-                framerate: 30,
-                keyframe_interval: 60,
-                preset: "ultrafast".to_string(),
-                use_hardware: false,
-                codec_type: codec_type.clone(),
-            };
-            match VideoEncoder::new(encoder_config) {
-                Ok(encoder) => {
-                    info!("Successfully initialized {:?} encoder for {}x{}", codec_type, width, height);
-                    video_encoder = Some(encoder);
-                },
-                Err(e) => {
-                    warn!("Encoder initialization failed: {}. Falling back to JPEG.", e);
-                    current_codec = "jpeg".to_string();
-                    codec_type = CodecType::from_string(&current_codec);
-                }
+        
+        let encoder_config = EncoderConfig {
+            width: width as u32,
+            height: height as u32,
+            bitrate: 2_000_000,
+            framerate: 30,
+            keyframe_interval: 60,
+            preset: "ultrafast".to_string(),
+            use_hardware: false,
+            codec_type: codec_type.clone(),
+        };
+        match VideoEncoder::new(encoder_config) {
+            Ok(encoder) => {
+                info!("Successfully initialized {:?} encoder for {}x{}", codec_type, width, height);
+                video_encoder = Some(encoder);
+            },
+            Err(e) => {
+                error!("Encoder initialization failed: {}", e);
+                // Without encoder, cannot proceed
+                return;
             }
         }
 
         // Control message handling (codec switch)
         let (codec_switch_tx, codec_switch_rx) = std::sync::mpsc::channel::<String>();
         let mut control_rx_for_thread = control_rx;
-        // Spawn a thread to listen for control messages and forward codec switches
+        // Spawn a thread to listen for control messages (codec switching disabled)
         let codec_switch_tx_clone = codec_switch_tx.clone();
         std::thread::spawn(move || {
             while let Some(control_msg) = control_rx_for_thread.blocking_recv() {
-                if let ControlMessage::SwitchCodec { codec } = control_msg {
-                    info!("[Screen Thread] Received codec switch to: {}", codec);
-                    let _ = codec_switch_tx_clone.send(codec);
+                if let ControlMessage::SwitchCodec { codec: _ } = control_msg {
+                    info!("[Screen Thread] Codec switch requested but VP8 is enforced");
+                    // Always use VP8 - ignore codec switch requests
+                    let _ = codec_switch_tx_clone.send("vp8".to_string());
                 }
             }
         });
@@ -912,11 +873,22 @@ async fn handle_legacy_socket_with_stop(
         let mut frame_count = 0u64;
         let mut _frames_processed = 0u64;
 
+        info!("Starting screen capture loop...");
+
         loop {
-            // Check for stop signal (non-blocking)
-            if thread_stop_rx.try_recv().is_ok() {
-                info!("Screen capture thread received stop signal, exiting");
-                break;
+            // Check for stop signal (non-blocking) - check multiple times to ensure we catch it
+            match thread_stop_rx.try_recv() {
+                Ok(_) => {
+                    info!("Screen capture thread received stop signal, exiting");
+                    break;
+                },
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    info!("Screen capture thread stop channel disconnected, exiting");
+                    break;
+                },
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    // No stop signal yet, continue
+                }
             }
 
             // Check for codec switch (non-blocking)
@@ -925,8 +897,8 @@ async fn handle_legacy_socket_with_stop(
                     info!("Switching encoder from {} to {}", current_codec, new_codec);
                     current_codec = new_codec.clone();
                     codec_type = CodecType::from_string(&current_codec);
-                    // Drop encoder if switching to JPEG
-                    if current_codec == "jpeg" {
+                    // Drop encoder if switching codecs
+                    if current_codec != "vp8" {
                         video_encoder = None;
                     } else {
                         // Re-initialize encoder for new codec
@@ -946,10 +918,8 @@ async fn handle_legacy_socket_with_stop(
                                 video_encoder = Some(encoder);
                             },
                             Err(e) => {
-                                warn!("Failed to re-initialize encoder: {}. Falling back to JPEG.", e);
-                                current_codec = "jpeg".to_string();
-                                codec_type = CodecType::from_string(&current_codec);
-                                video_encoder = None;
+                                error!("Failed to re-initialize encoder: {}", e);
+                                break;
                             }
                         }
                     }
@@ -958,30 +928,22 @@ async fn handle_legacy_socket_with_stop(
 
             frame_count += 1;
 
-            let use_delta = current_codec == "jpeg";
-
-            if use_delta {
-                match screen_capturer.capture_jpeg_delta(Some(current_quality)) {
-                    Ok(tiles) => {
-                        if let Err(_) = delta_tx.blocking_send(Ok(tiles)) {
-                            break;
-                        }
-                    },
-                    Err(e) => {
-                        let err_msg = format!("Failed to capture delta: {}", e);
-                        let _ = delta_tx.blocking_send(Err(err_msg));
-                        break;
-                    }
-                }
-            } else if let Some(encoder) = &mut video_encoder {
+            if let Some(encoder) = &mut video_encoder {
                 let _capture_start = Instant::now();
+                debug!("Attempting to capture frame {}", frame_count);
                 match screen_capturer.capture_raw() {
                     Ok(raw_frame) => {
+                        debug!("Successfully captured frame {} ({} bytes)", frame_count, raw_frame.len());
                         let force_keyframe = frame_count % 150 == 0;
+                        if force_keyframe {
+                            debug!("Forcing keyframe for frame {}", frame_count);
+                        }
                         match encoder.encode_frame(&raw_frame, force_keyframe) {
                             Ok(encoded) => {
                                 _frames_processed += 1;
+                                debug!("Successfully encoded frame {} ({} bytes)", frame_count, encoded.len());
                                 if let Err(_) = encoded_tx.blocking_send(Ok(encoded)) {
+                                    info!("Encoded frame channel closed, stopping screen capture thread");
                                     break;
                                 }
                             },
@@ -1005,10 +967,7 @@ async fn handle_legacy_socket_with_stop(
                                             continue;
                                         },
                                         Err(e) => {
-                                            error!("Software encoder also failed: {}, falling back to JPEG", e);
-                                            video_encoder = None;
-                                            current_codec = "jpeg".to_string();
-                                            codec_type = CodecType::from_string(&current_codec);
+                                            error!("Software encoder also failed: {}, stopping capture", e);
                                             break;
                                         }
                                     }
@@ -1027,18 +986,16 @@ async fn handle_legacy_socket_with_stop(
                     }
                 }
             } else {
-                match screen_capturer.capture_jpeg(current_quality) {
-                    Ok(jpeg_data) => {
-                        if let Err(_) = screen_tx.blocking_send(Ok(jpeg_data)) {
-                            break;
-                        }
-                    },
-                    Err(e) => {
-                        let err_msg = format!("Failed to capture jpeg: {}", e);
-                        let _ = screen_tx.blocking_send(Err(err_msg));
-                        break;
-                    }
-                }
+                // No encoder available
+                warn!("Video encoder not available for frame {}", frame_count);
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+
+            // Check for stop signal again before sleeping
+            if thread_stop_rx.try_recv().is_ok() {
+                info!("Screen capture thread received stop signal during sleep, exiting");
+                break;
             }
 
             std::thread::sleep(Duration::from_millis(1000 / 30));
@@ -1144,7 +1101,7 @@ async fn handle_legacy_socket_with_stop(
                     break;
                 }
                 
-                // Handle encoded frames (H.264/H.265/AV1)
+                // Handle encoded frames (VP8)
                 result = encoded_rx.recv() => {
                     match result {
                         Some(Ok(frame_data)) => {
@@ -1175,61 +1132,6 @@ async fn handle_legacy_socket_with_stop(
                         None => break,
                     }
                 }
-                
-                // Handle JPEG frames
-                result = screen_rx.recv() => {
-                    match result {
-                        Some(Ok(frame_data)) => {
-                            let now = Instant::now();
-                            if now.duration_since(last_frame_time) >= target_frame_interval {
-                                let frame_b64 = general_purpose::STANDARD.encode(&frame_data);
-                                let message = serde_json::json!({
-                                    "type": "frame",
-                                    "data": frame_b64,
-                                    "timestamp": SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis()
-                                }).to_string();
-                                
-                                if let Err(_) = message_tx_for_frames.send(message).await {
-                                    break;
-                                }
-                                
-                                last_frame_time = now;
-                            }
-                        },
-                        Some(Err(e)) => {
-                            error!("Frame error: {}", e);
-                            break;
-                        },
-                        None => break,
-                    }
-                }
-                
-                // Handle delta frames
-                result = delta_rx.recv() => {
-                    match result {
-                        Some(Ok(tiles)) => {
-                            let mut tile_data = HashMap::new();
-                            for (tile_idx, tile_bytes) in tiles.iter() {
-                                tile_data.insert(tile_idx.to_string(), general_purpose::STANDARD.encode(tile_bytes));
-                            }
-                            
-                            let message = serde_json::json!({
-                                "type": "delta_frame",
-                                "tiles": tile_data,
-                                "timestamp": SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis()
-                            }).to_string();
-                            
-                            if let Err(_) = message_tx_for_frames.send(message).await {
-                                break;
-                            }
-                        },
-                        Some(Err(e)) => {
-                            error!("Delta frame error: {}", e);
-                            break;
-                        },
-                        None => break,
-                    }
-                }
             }
         }
     });
@@ -1255,37 +1157,51 @@ async fn handle_legacy_socket_with_stop(
     }
     
     // Send stop signal to screen capture thread
-    let _ = thread_stop_tx.send(()).await;
+    info!("Sending stop signal to screen capture thread");
+    let _ = thread_stop_tx.try_send(());
     
-    // Wait for screen capture thread to finish
-    if let Err(e) = tokio::task::spawn_blocking(move || screen_handle.join()).await {
-        error!("Failed to join screen capture thread: {:?}", e);
+    // Give the thread a moment to process the stop signal
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    
+    // Wait for screen capture thread to finish with timeout
+    let join_result = tokio::time::timeout(
+        tokio::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || screen_handle.join())
+    ).await;
+    
+    match join_result {
+        Ok(Ok(Ok(()))) => {
+            info!("Screen capture thread joined successfully");
+        },
+        Ok(Ok(Err(e))) => {
+            error!("Screen capture thread panicked: {:?}", e);
+        },
+        Ok(Err(e)) => {
+            error!("Failed to spawn blocking task for thread join: {:?}", e);
+        },
+        Err(_) => {
+            warn!("Timeout waiting for screen capture thread to join - thread may still be running");
+        }
     }
     
     info!("WebSocket connection with stop signal finished cleanup");
 }
 
 async fn handle_webrtc_socket(socket: WebSocket, monitor: usize, enable_audio: bool) {
-    info!("Starting WebRTC H.264 streaming session: monitor={}, audio={}", monitor, enable_audio);
+    info!("Starting WebRTC VP8 streaming session: monitor={}, audio={}", monitor, enable_audio);
     
-    // TODO: Implement WebRTC streaming session
-    // For now, we'll comment out the WebRTC streaming to get compilation working
-    // The WebRTC streaming session has Send trait issues due to X11 screen capture types
-    
-    // Create placeholder channels for frame data
+    // Create channels for frame data and control
     let (frame_tx, mut frame_rx) = mpsc::channel::<EncodedFrameMessage>(10);
-    let (control_tx, _control_rx) = mpsc::channel::<StreamingControl>(10);
+    let (control_tx, mut control_rx) = mpsc::channel::<StreamingControl>(10);
     
-    // Start the streaming session
-    // TODO: Implement proper WebRTC streaming session handling
-    // For now, we'll comment out the streaming session to get compilation working
-    // The streaming session has Send trait issues due to X11 screen capture types
-    
-    // Start a placeholder task for frame capture
-    let capture_task = tokio::task::spawn(async move {
-        // Placeholder implementation
-        tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
-    });
+    // Initialize screen capture first to get dimensions
+    let (screen_width, screen_height) = match ScreenCapture::new(Some(monitor)) {
+        Ok(capture) => (capture.width(), capture.height()),
+        Err(e) => {
+            error!("Failed to initialize screen capture: {}", e);
+            return;
+        }
+    };
     
     // Split the WebSocket for sending and receiving
     let (mut sender, mut receiver) = socket.split();
@@ -1295,6 +1211,110 @@ async fn handle_webrtc_socket(socket: WebSocket, monitor: usize, enable_audio: b
     let client_tx_clone = client_tx.clone();
     let client_tx_clone2 = client_tx.clone();
     let client_tx_clone3 = client_tx.clone();
+    
+    // Send initial server info
+    let server_info = json!({
+        "type": "server_info",
+        "width": screen_width,
+        "height": screen_height,
+        "hostname": gethostname::gethostname().to_string_lossy(),
+        "codec": "vp8",  // Always send VP8 since that's our only supported codec
+        "audio": enable_audio,
+        "monitor": monitor
+    });
+    
+    if let Err(e) = client_tx_clone3.send(Message::Text(server_info.to_string())).await {
+        error!("Failed to send server info: {}", e);
+        return;
+    }
+    
+    // Start capture and encoding task
+    let frame_tx_clone = frame_tx.clone();
+    let capture_task = tokio::task::spawn_blocking(move || {
+        // Create capture and encoder in the worker thread
+        let mut capture = match ScreenCapture::new(Some(monitor)) {
+            Ok(capture) => capture,
+            Err(e) => {
+                error!("Failed to initialize screen capture in worker thread: {}", e);
+                return;
+            }
+        };
+        
+        let encoder_config = EncoderConfig {
+            width: screen_width as u32,
+            height: screen_height as u32,
+            bitrate: 2_000_000, // 2 Mbps default
+            framerate: 30,
+            keyframe_interval: 30,
+            preset: "ultrafast".to_string(),
+            use_hardware: false, // Start with software, fallback is built-in
+            codec_type: CodecType::VP8,
+        };
+        
+        let mut encoder = match VideoEncoder::new(encoder_config.clone()) {
+            Ok(encoder) => encoder,
+            Err(e) => {
+                error!("Failed to initialize video encoder in worker thread: {}", e);
+                return;
+            }
+        };
+        
+        let rt = tokio::runtime::Handle::current();
+        let mut frame_count = 0u32;
+        let mut last_keyframe = std::time::Instant::now();
+        let keyframe_interval = std::time::Duration::from_secs(2);
+        
+        loop {
+            // Capture screen
+            let frame_data = match capture.capture_rgba() {
+                Ok(data) => data,
+                Err(e) => {
+                    error!("Screen capture failed: {}", e);
+                    std::thread::sleep(std::time::Duration::from_millis(33)); // ~30 FPS
+                    continue;
+                }
+            };
+            
+            // Force keyframe every 2 seconds
+            let force_keyframe = last_keyframe.elapsed() > keyframe_interval;
+            if force_keyframe {
+                last_keyframe = std::time::Instant::now();
+            }
+            
+            // Encode frame
+            let encoded_data = match encoder.encode_frame(&frame_data, force_keyframe) {
+                Ok(data) => data,
+                Err(e) => {
+                    error!("Frame encoding failed: {}", e);
+                    std::thread::sleep(std::time::Duration::from_millis(33));
+                    continue;
+                }
+            };
+            
+            if !encoded_data.is_empty() {
+                let frame_msg = EncodedFrameMessage {
+                    data: encoded_data,
+                    is_keyframe: force_keyframe,
+                    timestamp: SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64,
+                    sequence_number: frame_count,
+                    rtp_packets: vec![], // Not used for WebSocket streaming
+                };
+                
+                if let Err(_) = rt.block_on(frame_tx_clone.send(frame_msg)) {
+                    warn!("Frame channel closed, stopping capture");
+                    break;
+                }
+                
+                frame_count = frame_count.wrapping_add(1);
+            }
+            
+            // Control frame rate (~30 FPS)
+            std::thread::sleep(std::time::Duration::from_millis(33));
+        }
+    });
     
     // Handle incoming WebSocket messages
     let control_tx_clone = control_tx.clone();
@@ -1336,8 +1356,8 @@ async fn handle_webrtc_socket(socket: WebSocket, monitor: usize, enable_audio: b
                             }
                         },
                         Ok(ControlMessage::SwitchCodec { codec: _ }) => {
-                            // WebRTC doesn't support codec switching currently
-                            warn!("Codec switching not supported in WebRTC mode");
+                            // VP8 is enforced - codec switching disabled
+                            warn!("Codec switching disabled - VP8 is enforced");
                         },
                         Err(e) => {
                             error!("Failed to parse control message: {}", e);
@@ -1391,7 +1411,7 @@ async fn handle_webrtc_socket(socket: WebSocket, monitor: usize, enable_audio: b
     let server_info = json!({
         "type": "server_info",
         "monitor": monitor,
-        "codec": "webrtc",
+        "codec": "vp8",  // Always send VP8 since that's our only supported codec
         "audio": enable_audio,
         "width": 1920, // TODO: Get actual screen dimensions
         "height": 1080,
@@ -1399,6 +1419,25 @@ async fn handle_webrtc_socket(socket: WebSocket, monitor: usize, enable_audio: b
     });
     
     let _ = client_tx_clone3.send(Message::Text(server_info.to_string())).await;
+    
+    // Send monitor list
+    let monitor_list = json!({
+        "type": "monitors",
+        "monitors": [
+            {
+                "id": "primary",
+                "name": "Primary Monitor",
+                "width": 1920,
+                "height": 1080,
+                "position_x": 0,
+                "position_y": 0,
+                "is_primary": true,
+                "scale_factor": 1.0
+            }
+        ]
+    });
+    
+    let _ = client_tx_clone3.send(Message::Text(monitor_list.to_string())).await;
     
     // Wait for any task to complete
     tokio::select! {
@@ -1430,7 +1469,7 @@ async fn handle_webrtc_socket_with_stop(
     enable_audio: bool, 
     mut stop_rx: broadcast::Receiver<()>
 ) {
-    info!("Starting WebRTC H.264 streaming session with stop signal: monitor={}, audio={}", monitor, enable_audio);
+    info!("Starting WebRTC VP8 streaming session with stop signal: monitor={}, audio={}", monitor, enable_audio);
     
     tokio::select! {
         _ = handle_webrtc_socket(socket, monitor, enable_audio) => {

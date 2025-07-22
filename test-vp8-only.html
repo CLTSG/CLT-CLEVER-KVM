@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VP8 Only Test</title>
+    <style>
+        body { margin: 20px; font-family: Arial, sans-serif; }
+        .container { max-width: 800px; margin: 0 auto; }
+        #video-screen { width: 100%; height: 400px; background: #000; }
+        #canvas-layer { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            pointer-events: auto; 
+            opacity: 0; 
+            z-index: 1; 
+            border: 2px dashed #ff0000;
+        }
+        .log { 
+            margin-top: 20px; 
+            padding: 10px; 
+            background: #f5f5f5; 
+            border-left: 4px solid #007cba; 
+            max-height: 300px; 
+            overflow-y: auto;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>VP8 Only Mode Test</h1>
+        <p>This test verifies that the KVM client works with VP8 video only, without canvas fallback.</p>
+        
+        <div style="position: relative;">
+            <video id="video-screen" autoplay playsinline muted></video>
+            <canvas id="canvas-layer"></canvas>
+        </div>
+        
+        <div class="log" id="log">
+            <h3>Test Log:</h3>
+            <div id="log-content"></div>
+        </div>
+        
+        <button onclick="runTest()">Run VP8 Test</button>
+    </div>
+
+    <script>
+        function log(message) {
+            const logContent = document.getElementById('log-content');
+            const timestamp = new Date().toLocaleTimeString();
+            logContent.innerHTML += `[${timestamp}] ${message}<br>`;
+            logContent.scrollTop = logContent.scrollHeight;
+        }
+
+        function runTest() {
+            log('Starting VP8 Only Mode Test...');
+            
+            // Test 1: MediaSource API support
+            if (!window.MediaSource) {
+                log('❌ FAIL: MediaSource API not supported');
+                return;
+            }
+            log('✓ PASS: MediaSource API is supported');
+            
+            // Test 2: VP8 codec support
+            const codecConfigs = [
+                'video/webm; codecs="vp8"',
+                'video/webm; codecs=vp8',
+            ];
+            
+            let supportedCodec = null;
+            for (const codec of codecConfigs) {
+                if (MediaSource.isTypeSupported(codec)) {
+                    supportedCodec = codec;
+                    break;
+                }
+            }
+            
+            if (!supportedCodec) {
+                log('❌ FAIL: No VP8 codec configurations supported');
+                log('Available codec support:');
+                codecConfigs.forEach(codec => {
+                    log(`  - ${codec}: ${MediaSource.isTypeSupported(codec)}`);
+                });
+                return;
+            }
+            log(`✓ PASS: VP8 codec supported: ${supportedCodec}`);
+            
+            // Test 3: Canvas element for input handling
+            const canvasLayer = document.getElementById('canvas-layer');
+            if (!canvasLayer) {
+                log('❌ FAIL: Canvas layer not found');
+                return;
+            }
+            log('✓ PASS: Canvas layer found for input handling');
+            
+            // Test 4: Video element
+            const videoScreen = document.getElementById('video-screen');
+            if (!videoScreen) {
+                log('❌ FAIL: Video screen element not found');
+                return;
+            }
+            log('✓ PASS: Video screen element found');
+            
+            // Test 5: MediaSource initialization
+            try {
+                const mediaSource = new MediaSource();
+                const sourceURL = URL.createObjectURL(mediaSource);
+                videoScreen.src = sourceURL;
+                
+                mediaSource.addEventListener('sourceopen', () => {
+                    log('✓ PASS: MediaSource opened successfully');
+                    
+                    try {
+                        const sourceBuffer = mediaSource.addSourceBuffer(supportedCodec);
+                        log('✓ PASS: SourceBuffer created successfully');
+                        log('🎉 ALL TESTS PASSED: VP8 video mode is ready!');
+                        
+                        // Cleanup
+                        URL.revokeObjectURL(sourceURL);
+                        
+                    } catch (e) {
+                        log(`❌ FAIL: SourceBuffer creation failed: ${e.message}`);
+                    }
+                });
+                
+                mediaSource.addEventListener('error', (e) => {
+                    log(`❌ FAIL: MediaSource error: ${e.message || 'Unknown error'}`);
+                });
+                
+            } catch (e) {
+                log(`❌ FAIL: MediaSource initialization failed: ${e.message}`);
+            }
+            
+            log('Test completed. Check results above.');
+        }
+
+        // Auto-run test on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            log('Page loaded. VP8 Only Mode Test ready.');
+            runTest();
+        });
+    </script>
+</body>
+</html>

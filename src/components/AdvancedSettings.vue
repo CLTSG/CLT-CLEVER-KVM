@@ -9,22 +9,10 @@
     <div class="setting-group">
       <h4>Codec Selection</h4>
       <label>
-        <input type="radio" v-model="settings.useH264" :value="true" 
+        <input type="radio" v-model="settings.useVP8" :value="true" 
                :disabled="disabled"
-               @change="settings.useH265 = false; settings.useAV1 = false" />
-        H.264 (Best compatibility)
-      </label>
-      <label>
-        <input type="radio" v-model="settings.useH265" :value="true" 
-               :disabled="disabled"
-               @change="settings.useH264 = false; settings.useAV1 = false" />
-        H.265/HEVC (Better quality, lower bandwidth)
-      </label>
-      <label>
-        <input type="radio" v-model="settings.useAV1" :value="true" 
-               :disabled="disabled"
-               @change="settings.useH264 = false; settings.useH265 = false" />
-        AV1 (Experimental, newest codec)
+               checked />
+        WebRTC VP8 (Optimized for real-time streaming)
       </label>
     </div>
     
