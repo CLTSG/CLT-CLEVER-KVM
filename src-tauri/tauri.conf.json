@@ -11,6 +11,14 @@
     "version": "0.1.0"
   },
   "tauri": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/CLTSG/CLT-CLEVER-KVM/releases/latest/download/latest.json"
+      ],
+      "dialog": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVDRTRCOEZENEM5ODUwQTYKUldTbVVKaE0vYmprWEZEU0F4aVFOcUZHSW9VTjZ3eXRHYmlXZDBhamkrdnZVY0hsOHNLMmI2UGwK"
+    },
     "allowlist": {
       "all": false,
       "shell": {
@@ -65,7 +73,40 @@
         "icons/128x128@2x.png",
         "icons/icon.icns",
         "icons/icon.ico"
-      ]
+      ],
+      "category": "Utility",
+      "shortDescription": "A powerful KVM solution for remote desktop control",
+      "longDescription": "Clever KVM is a cross-platform KVM (Keyboard, Video, Mouse) solution that enables remote desktop control with high-quality video streaming using VP8 encoding.",
+      "copyright": "© 2025 Clever Technologies",
+      "publisher": "Clever Technologies",
+      "resources": [],
+      "externalBin": [],
+      "windows": {
+        "certificateThumbprint": null,
+        "digestAlgorithm": "sha256",
+        "timestampUrl": "",
+        "wix": {
+          "language": "en-US"
+        },
+        "nsis": {
+          "languages": ["English"],
+          "displayLanguageSelector": false
+        }
+      },
+      "macOS": {
+        "frameworks": [],
+        "minimumSystemVersion": "10.13",
+        "exceptionDomain": "",
+        "signingIdentity": null,
+        "providerShortName": null,
+        "entitlements": null
+      },
+      "deb": {
+        "depends": ["libwebkit2gtk-4.0-37", "libgtk-3-0"]
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
     }
   }
 }
