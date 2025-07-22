@@ -12,7 +12,7 @@
   },
   "tauri": {
     "updater": {
-      "active": true,
+      "active": false,
       "endpoints": [
         "https://github.com/CLTSG/CLT-CLEVER-KVM/releases/latest/download/latest.json"
       ],
