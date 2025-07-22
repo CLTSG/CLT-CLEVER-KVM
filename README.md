@@ -23,7 +23,30 @@ A remote desktop system (screen sharing, mouse and keyboard control) built with 
 
 ### System Dependencies
 
-On Debian/Ubuntu-based systems, install the required dependencies:
+#### FFmpeg (Required for all platforms)
+
+This application requires FFmpeg for video encoding. Install it before building:
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt-get update
+sudo apt-get install -y ffmpeg libavcodec-dev libavformat-dev libavutil-dev \
+    libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev pkg-config
+```
+
+**macOS:**
+```bash
+brew install ffmpeg pkg-config
+```
+
+**Windows:**
+```bash
+choco install ffmpeg pkgconfiglite -y
+```
+
+#### Tauri Dependencies
+
+On Debian/Ubuntu-based systems, also install the Tauri dependencies:
 
 ```bash
 #This is for Ubuntu 22.04 above if below this ubuntu version can skip to step number 4.
@@ -31,6 +54,20 @@ On Debian/Ubuntu-based systems, install the required dependencies:
 2. Insert new line deb http://archive.ubuntu.com/ubuntu jammy main universe
 3. sudo apt update
 4. sudo apt install libwebkit2gtk-4.0-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libjavascriptcoregtk-4.0-bin  libjavascriptcoregtk-4.0-dev libsoup2.4-dev libxdo-dev libxcb-randr0-dev
+```
+
+#### 🩺 Troubleshooting FFmpeg Issues
+
+If you encounter FFmpeg build errors, run our troubleshooting script:
+
+**Linux/macOS:**
+```bash
+./scripts/fix-ffmpeg.sh
+```
+
+**Windows:**
+```bash
+scripts\fix-ffmpeg.bat
 ```
 
 #### Setup and Build
