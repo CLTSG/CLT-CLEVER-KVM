@@ -7,10 +7,10 @@ use crate::server::webrtc_handler::{QualityProfile, StreamingControl, EncodedFra
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::{
-    sync::{mpsc, broadcast},
+    sync::{mpsc, broadcast, Mutex},
     time,
 };
 use uuid::Uuid;
@@ -583,7 +583,7 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, _codec: String,
     let input_handler_for_events = input_handler.clone();
     tokio::spawn(async move {
         while let Some(event) = input_rx.recv().await {
-            let mut handler = input_handler_for_events.lock().unwrap();
+            let mut handler = input_handler_for_events.lock().await;
             if let Err(e) = handler.handle_event(event) {
                 error!("Failed to handle input event: {}", e);
             }
@@ -1077,7 +1077,7 @@ async fn handle_legacy_socket_with_stop(
     let input_handler_for_events = input_handler.clone();
     tokio::spawn(async move {
         while let Some(event) = input_rx.recv().await {
-            let mut handler = input_handler_for_events.lock().unwrap();
+            let mut handler = input_handler_for_events.lock().await;
             if let Err(e) = handler.handle_event(event) {
                 error!("Failed to handle input event: {}", e);
             }

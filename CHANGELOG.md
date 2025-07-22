@@ -12,6 +12,9 @@
   - Cross-platform support (Windows, macOS, Linux)
 - **🏗️ Enhanced Build System**: Improved GitHub Actions workflows with update signing
   - Fixed FFmpeg dependency installation for all platforms
+  - Fixed Ubuntu linker error (libxcb-randr0-dev missing dependency)
+  - Fixed macOS compilation errors (async Send trait issues, missing Key variants)
+  - Fixed Windows FFmpeg build with proper vcpkg integration
   - Added comprehensive system dependency management
   - Optimized Windows builds with Chocolatey
   - Enhanced macOS builds with Homebrew integration
@@ -25,11 +28,11 @@
   - Detailed BUILD.md with troubleshooting guides
   - Complete pull request description with technical details
 - **🧪 Testing Tools**: Added scripts for testing and validating updater functionality
-- Initial VP8 encoding implementation
-- WebSocket-based streaming
-- Cross-platform desktop application
-- Multi-monitor support
-- Audio streaming capabilities
+ - Initial VP8 encoding implementation
+ - WebSocket-based streaming
+ - Cross-platform desktop application
+ - Multi-monitor support
+ - Audio streaming capabilities
 
 ### [1.0.0] - 2025-07-22
 - Initial release

@@ -58,7 +58,8 @@ install_dependencies() {
                 echo "Installing via apt-get..."
                 sudo apt-get update
                 sudo apt-get install -y ffmpeg libavcodec-dev libavformat-dev libavutil-dev \
-                    libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev pkg-config
+                    libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev pkg-config \
+                    libxcb-randr0-dev
             elif command_exists yum; then
                 echo "Installing via yum..."
                 sudo yum install -y ffmpeg-devel pkgconfig
