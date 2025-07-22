@@ -3,8 +3,12 @@ name = "clever-kvm"
 version = "0.1.0"
 description = "A KVM solution built with Tauri"
 authors = ["Clever Technologies"]
-license = ""
-repository = ""
+license = "MIT"
+repository = "https://github.com/CLTSG/CLT-CLEVER-KVM"
+homepage = "https://github.com/CLTSG/CLT-CLEVER-KVM"
+documentation = "https://github.com/CLTSG/CLT-CLEVER-KVM#readme"
+keywords = ["kvm", "remote-desktop", "tauri", "vp8", "streaming"]
+categories = ["multimedia", "network-programming"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -13,7 +17,7 @@ edition = "2021"
 tauri-build = { version = "1.5", features = [] }
 
 [dependencies]
-tauri = { version = "1.5", features = [ "window-all", "fs-all", "dialog-all", "notification-all", "process-all", "os-all", "global-shortcut-all", "shell-open"] }
+tauri = { version = "1.5", features = [ "window-all", "fs-all", "dialog-all", "notification-all", "process-all", "os-all", "global-shortcut-all", "shell-open", "updater"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.32.0", features = ["full"] }

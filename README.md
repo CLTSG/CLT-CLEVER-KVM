@@ -13,6 +13,7 @@ A remote desktop system (screen sharing, mouse and keyboard control) built with 
 - **WebRTC Audio Support**: High-quality audio streaming from the host computer
 - **Multi-monitor Support**: Select which monitor to display and control
 - **Smart Frame Management**: Delta encoding and intelligent frame dropping for optimal performance
+- **Auto-Updater**: Built-in automatic updates with cryptographic signature verification
 
 ## Requirements
 
@@ -110,6 +111,49 @@ You can view logs directly within the application:
 - [Node.js](https://nodejs.org/) (v16 or later)
 - [Rust](https://www.rust-lang.org/) (v1.67 or later)
 - [Tauri CLI](https://tauri.app/v1/guides/getting-started/prerequisites)
+
+## 📦 Building and Distribution
+
+### Quick Build
+
+For a quick local build:
+
+```bash
+# Make the build script executable
+chmod +x scripts/build.sh
+
+# Build the application
+./scripts/build.sh
+```
+
+### Automated Releases
+
+To create a new release with automatic GitHub deployment:
+
+```bash
+# Prepare a new release version
+./scripts/prepare-release.sh 1.0.0
+
+# Commit and tag
+git add .
+git commit -m "Release v1.0.0"
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This will automatically:
+- Build for Windows, macOS, and Linux
+- Create installers (.msi, .exe, .dmg, .deb, .AppImage)
+- Upload to GitHub Releases
+
+### Distribution Files
+
+Each release includes:
+- **Windows**: MSI installer and NSIS setup executable
+- **macOS**: Universal DMG (Intel + Apple Silicon)
+- **Linux**: Debian package and AppImage
+
+For detailed build instructions, troubleshooting, and platform-specific notes, see [BUILD.md](BUILD.md).
 
 ## License
 
