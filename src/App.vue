@@ -8,6 +8,8 @@ import ServerStatus from "./components/ServerStatus.vue";
 import ServerConfiguration from "./components/ServerConfiguration.vue";
 import ConnectionOptions from "./components/ConnectionOptions.vue";
 import LogViewer from "./components/LogViewer.vue";
+import UpdaterDialog from "./components/UpdaterDialog.vue";
+import UpdateChecker from "./components/UpdateChecker.vue";
 
 const {
   serverStatus,
@@ -82,6 +84,12 @@ const tabs = computed(() => {
           :open-url="openUrl"
           :copy-url="copyUrl"
         />
+        
+        <!-- Update checker section -->
+        <div class="update-section">
+          <h3>Application Updates</h3>
+          <UpdateChecker />
+        </div>
       </template>
 
       <template #config>
@@ -110,6 +118,9 @@ const tabs = computed(() => {
         <LogViewer />
       </template>
     </TabContainer>
+
+    <!-- Auto-updater dialog -->
+    <UpdaterDialog />
   </main>
 </template>
 
@@ -157,6 +168,18 @@ h1 {
 .config-warning p {
   margin: 0;
   font-weight: 500;
+}
+
+.update-section {
+  margin-top: 2rem;
+  padding-top: 2rem;
+  border-top: 1px solid #e9ecef;
+}
+
+.update-section h3 {
+  margin: 0 0 1rem 0;
+  color: #2c3e50;
+  font-size: 1.25rem;
 }
 
 @media (max-width: 768px) {
