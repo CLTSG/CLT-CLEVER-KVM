@@ -31,7 +31,8 @@ This application requires FFmpeg for video encoding. Install it before building:
 ```bash
 sudo apt-get update
 sudo apt-get install -y ffmpeg libavcodec-dev libavformat-dev libavutil-dev \
-    libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev pkg-config
+    libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev pkg-config \
+    libxcb-randr0-dev
 ```
 
 **macOS:**
@@ -41,7 +42,16 @@ brew install ffmpeg pkg-config
 
 **Windows:**
 ```bash
-choco install ffmpeg pkgconfiglite -y
+# Install vcpkg
+git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+cd C:\vcpkg
+.\bootstrap-vcpkg.bat
+.\vcpkg.exe integrate install
+# Install FFmpeg
+.\vcpkg.exe install ffmpeg[avcodec,avformat,avdevice,avfilter,swresample,swscale]:x64-windows
+# Set environment variables
+set VCPKG_ROOT=C:\vcpkg
+set PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig
 ```
 
 #### Tauri Dependencies

@@ -30,7 +30,7 @@ lazy_static! {
         m.insert("End", Key::End);
         m.insert("PageUp", Key::PageUp);
         m.insert("PageDown", Key::PageDown);
-        m.insert("Insert", Key::Insert);
+        // m.insert("Insert", Key::Insert); // Not available in this enigo version
         m.insert("Delete", Key::Delete);
         
         // Arrow keys
@@ -46,9 +46,9 @@ lazy_static! {
         m.insert("Escape", Key::Escape);
         m.insert("Space", Key::Space);
         m.insert("CapsLock", Key::CapsLock);
-        m.insert("NumLock", Key::Numlock); // Fixed: Numlock instead of NumLock
-        m.insert("ScrollLock", Key::ScrollLock);
-        m.insert("PrintScreen", Key::Print);
+        // m.insert("NumLock", Key::Numlock); // Not available in this enigo version
+        // m.insert("ScrollLock", Key::ScrollLock); // Not available in this enigo version
+        // m.insert("PrintScreen", Key::Print); // Not available in this enigo version
         
         // Modifier keys
         m.insert("Control", Key::Control);
@@ -508,7 +508,8 @@ impl InputHandler {
             "End" => Ok(Key::End),
             "PageUp" => Ok(Key::PageUp),
             "PageDown" => Ok(Key::PageDown),
-            "Insert" => Ok(Key::Insert),
+            // "Insert" => Ok(Key::Insert), // Not available in this enigo version
+            "Insert" => Err(format!("Insert key not supported in this enigo version")),
             "Delete" => Ok(Key::Delete),
             "ArrowUp" => Ok(Key::UpArrow),
             "ArrowDown" => Ok(Key::DownArrow),
@@ -555,6 +556,10 @@ impl InputHandler {
             "NumpadDivide" => Ok(Key::Layout('/')),
             "NumpadDecimal" => Ok(Key::Layout('.')),
             "NumpadEnter" => Ok(Key::Return),
+            // Keys not supported in this enigo version
+            "NumLock" => Err(format!("NumLock key not supported in this enigo version")),
+            "ScrollLock" => Err(format!("ScrollLock key not supported in this enigo version")),
+            "PrintScreen" => Err(format!("PrintScreen key not supported in this enigo version")),
             // Add more as needed
             _ => Err(format!("Unsupported key code: {}", code)),
         }

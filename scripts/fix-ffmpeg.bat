@@ -7,54 +7,54 @@ echo 🔍 FFmpeg Build Troubleshooting Script (Windows)
 echo ===============================================
 echo.
 
-REM Check if chocolatey is available
-where choco >nul 2>&1
+REM Check if vcpkg is available
+if exist "C:\vcpkg\vcpkg.exe" (
+    echo ✅ vcpkg is available at C:\vcpkg
+    goto :install_ffmpeg
+)
+
+echo ❌ vcpkg not found
+echo 📥 Installing vcpkg...
+git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
 if %ERRORLEVEL% NEQ 0 (
-    echo ❌ Chocolatey not found
-    echo    Please install Chocolatey from https://chocolatey.org/install
-    echo    Or manually install FFmpeg and pkg-config
+    echo ❌ Failed to clone vcpkg
+    goto :end
+)
+
+cd C:\vcpkg
+.\bootstrap-vcpkg.bat
+if %ERRORLEVEL% NEQ 0 (
+    echo ❌ Failed to bootstrap vcpkg
+    goto :end
+)
+
+.\vcpkg.exe integrate install
+if %ERRORLEVEL% NEQ 0 (
+    echo ❌ Failed to integrate vcpkg
+    goto :end
+)
+
+echo ✅ vcpkg installed and integrated
+
+:install_ffmpeg
+echo 📥 Installing FFmpeg via vcpkg...
+cd C:\vcpkg
+.\vcpkg.exe install ffmpeg[avcodec,avformat,avdevice,avfilter,swresample,swscale]:x64-windows
+if %ERRORLEVEL% NEQ 0 (
+    echo ❌ Failed to install FFmpeg
     goto :end
 ) else (
-    echo ✅ Chocolatey is available
+    echo ✅ FFmpeg installed via vcpkg
 )
 
-REM Check if ffmpeg is available
-where ffmpeg >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
-    echo ❌ FFmpeg not found
-    echo 📥 Installing FFmpeg via Chocolatey...
-    choco install ffmpeg -y
-    if %ERRORLEVEL% NEQ 0 (
-        echo ❌ Failed to install FFmpeg
-        goto :end
-    )
-    echo ✅ FFmpeg installed
-) else (
-    echo ✅ FFmpeg is available
-    ffmpeg -version 2>&1 | findstr "ffmpeg version"
-)
-
-REM Check if pkg-config is available
-where pkg-config >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
-    echo ❌ pkg-config not found
-    echo 📥 Installing pkg-config via Chocolatey...
-    choco install pkgconfiglite -y
-    if %ERRORLEVEL% NEQ 0 (
-        echo ❌ Failed to install pkg-config
-        goto :end
-    )
-    echo ✅ pkg-config installed
-) else (
-    echo ✅ pkg-config is available
-    pkg-config --version
-)
-
-REM Set environment variables
 echo.
 echo 🔧 Setting environment variables...
+set VCPKG_ROOT=C:\vcpkg
+set PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig
 set PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
 set PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
+echo ✅ Set VCPKG_ROOT=C:\vcpkg
+echo ✅ Set PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig
 echo ✅ Set PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
 echo ✅ Set PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
 
@@ -80,10 +80,13 @@ echo 🎉 Troubleshooting complete!
 echo.
 echo 💡 If you're still having issues:
 echo    1. Restart your terminal/command prompt
-echo    2. Make sure FFmpeg and pkg-config are in your PATH
-echo    3. Set these environment variables permanently:
+echo    2. Make sure these environment variables are set:
+echo       - VCPKG_ROOT=C:\vcpkg
+echo       - PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig
 echo       - PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
 echo       - PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
+echo    3. Verify FFmpeg pkg-config files exist:
+echo       dir "C:\vcpkg\installed\x64-windows\lib\pkgconfig\libav*.pc"
 echo    4. Try building with: npm run tauri:build
 echo.
 

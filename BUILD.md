@@ -59,7 +59,7 @@ sudo apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev \
     libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev \
     ffmpeg libavcodec-dev libavformat-dev libavutil-dev \
     libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev \
-    pkg-config
+    pkg-config libxcb-randr0-dev
 ```
 
 #### macOS
@@ -69,9 +69,17 @@ brew install ffmpeg pkg-config
 ```
 
 #### Windows
-```bash
-# Install Chocolatey if you haven't already: https://chocolatey.org/install
-choco install ffmpeg pkgconfiglite -y
+```batch
+# Install vcpkg
+git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+cd C:\vcpkg
+.\bootstrap-vcpkg.bat
+.\vcpkg.exe integrate install
+# Install FFmpeg with all components
+.\vcpkg.exe install ffmpeg[avcodec,avformat,avdevice,avfilter,swresample,swscale]:x64-windows
+# Set environment variables
+set VCPKG_ROOT=C:\vcpkg
+set PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig
 ```
 
 ### 🩺 FFmpeg Troubleshooting
