@@ -48,6 +48,65 @@ Clever KVM includes built-in auto-updater functionality that automatically notif
 
 ## 🏗️ Local Building
 
+### 🔧 Prerequisites
+
+Before building, you need to install system dependencies including FFmpeg:
+
+#### Linux (Ubuntu/Debian)
+```bash
+sudo apt-get update
+sudo apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev \
+    libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev \
+    ffmpeg libavcodec-dev libavformat-dev libavutil-dev \
+    libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev \
+    pkg-config
+```
+
+#### macOS
+```bash
+# Install Homebrew if you haven't already: https://brew.sh/
+brew install ffmpeg pkg-config
+```
+
+#### Windows
+```bash
+# Install Chocolatey if you haven't already: https://chocolatey.org/install
+choco install ffmpeg pkgconfiglite -y
+```
+
+### 🩺 FFmpeg Troubleshooting
+
+If you encounter FFmpeg-related build errors, use our troubleshooting script:
+
+#### Linux/macOS:
+```bash
+./scripts/fix-ffmpeg.sh
+```
+
+#### Windows:
+```batch
+scripts\fix-ffmpeg.bat
+```
+
+The script will:
+- Check if FFmpeg and pkg-config are installed
+- Install missing dependencies
+- Set required environment variables
+- Test the build process
+
+### 🛠️ Common FFmpeg Issues
+
+**Error**: `The system library 'libavutil' required by crate 'ffmpeg-sys-next' was not found`
+
+**Solution**:
+1. Install FFmpeg development libraries (see prerequisites above)
+2. Set environment variables:
+   ```bash
+   export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
+   export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
+   ```
+3. Run the troubleshooting script for your platform
+
 ### Prerequisites
 
 - **Node.js** (v16 or later)
