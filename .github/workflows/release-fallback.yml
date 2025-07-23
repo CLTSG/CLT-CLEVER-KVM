@@ -1,15 +1,13 @@
-name: Build and Release
+name: Build and Release (Fallback)
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version tag (e.g., v1.0.0)'
-        required: true
-        type: string
+      use_fallback:
+        description: 'Use fallback build strategy for macOS'
+        required: false
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -52,15 +50,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Build separate binaries for macOS architectures if universal fails
           - platform: 'macos-latest'
-            args: '--target universal-apple-darwin'
-            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+            args: '--target x86_64-apple-darwin'
+            rust-targets: 'x86_64-apple-darwin'
+            suffix: 'x64'
+          - platform: 'macos-latest'
+            args: '--target aarch64-apple-darwin'
+            rust-targets: 'aarch64-apple-darwin'
+            suffix: 'arm64'
           - platform: 'ubuntu-22.04'
             args: ''
             rust-targets: ''
+            suffix: ''
           - platform: 'windows-latest'
             args: ''
             rust-targets: ''
+            suffix: ''
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -75,7 +81,6 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          # Those targets are only used on macOS runners so it's in an `if` to slightly speed up the CI.
           targets: ${{ matrix.rust-targets }}
 
       - name: Rust cache
@@ -83,41 +88,17 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
-      - name: Cache vcpkg (Windows only)
-        if: matrix.platform == 'windows-latest'
-        uses: actions/cache@v4
-        with:
-          path: C:\vcpkg
-          key: vcpkg-${{ runner.os }}-ffmpeg-v1
-          restore-keys: |
-            vcpkg-${{ runner.os }}-
-
       - name: Install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libxdo-dev libxrandr-dev libxcb-randr0-dev
           sudo apt-get install -y ffmpeg libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev pkg-config
-          # Verify installation
-          pkg-config --modversion libavutil
-          pkg-config --libs libavutil
 
       - name: Install dependencies (macOS only)
         if: matrix.platform == 'macos-latest'
         run: |
-          # Install FFmpeg for both architectures to support universal builds
           brew install ffmpeg pkg-config
-          
-          # For universal builds, we need to set up cross-compilation environment
-          # Install Xcode command line tools if not present
-          xcode-select --install || true
-          
-          # Verify installation
-          pkg-config --modversion libavutil
-          pkg-config --libs libavutil
-          
-          # Set up environment for cross-compilation
-          echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1" >> $GITHUB_ENV
@@ -125,24 +106,15 @@ jobs:
       - name: Install dependencies (Windows only)
         if: matrix.platform == 'windows-latest'
         run: |
-          # Check if vcpkg is cached, if not install it
           if (-not (Test-Path "C:\vcpkg\vcpkg.exe")) {
-            Write-Host "Installing vcpkg..."
             git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
             cd C:\vcpkg
             .\bootstrap-vcpkg.bat
             .\vcpkg.exe integrate install
-          } else {
-            Write-Host "Using cached vcpkg installation"
-            cd C:\vcpkg
           }
-          # Install ffmpeg with all required components
+          cd C:\vcpkg
           .\vcpkg.exe install ffmpeg[avcodec,avformat,avdevice,avfilter,swresample,swscale]:x64-windows
-          # Set environment variables
-          echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
           echo "PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig" >> $env:GITHUB_ENV
-          # Verify installation
-          Get-ChildItem "C:\vcpkg\installed\x64-windows\lib\pkgconfig\libav*.pc" | Select-Object Name
 
       - name: Install frontend dependencies
         run: npm ci
@@ -150,39 +122,15 @@ jobs:
       - name: Build the app
         uses: tauri-apps/tauri-action@v0
         env:
-          RUSTFLAGS: ${{ env.RUSTFLAGS }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          # FFmpeg environment variables
           PKG_CONFIG_ALLOW_SYSTEM_LIBS: 1
           PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: 1
           PKG_CONFIG_ALLOW_CROSS: 1
-          # macOS specific environment for universal builds
-          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.platform == 'macos-latest' && '10.13' || '' }}
-          # Disable FFmpeg features that cause cross-compilation issues
-          FFMPEG_PKG_CONFIG_PATH: ${{ matrix.platform == 'macos-latest' && '/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig' || '' }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
-        # If universal build fails, try again without FFmpeg feature
-        continue-on-error: ${{ matrix.platform == 'macos-latest' }}
-
-      - name: Fallback build without FFmpeg (macOS only)
-        if: failure() && matrix.platform == 'macos-latest'
-        uses: tauri-apps/tauri-action@v0
-        env:
-          RUSTFLAGS: ${{ env.RUSTFLAGS }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          PKG_CONFIG_ALLOW_SYSTEM_LIBS: 1
-          PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: 1
-          PKG_CONFIG_ALLOW_CROSS: 1
-          MACOSX_DEPLOYMENT_TARGET: '10.13'
-        with:
-          releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: '${{ matrix.args }} --no-default-features --features custom-protocol'
 
   publish-release:
     permissions:

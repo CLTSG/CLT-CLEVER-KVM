@@ -1,4 +1,5 @@
 use anyhow::Result;
+#[cfg(feature = "ffmpeg")]
 use ffmpeg_next as ffmpeg;
 use thiserror::Error;
 use log::{debug, error, info, warn};
@@ -42,6 +43,7 @@ impl CodecType {
         }
     }
     
+    #[cfg(feature = "ffmpeg")]
     pub fn to_ffmpeg_codec_id(&self) -> ffmpeg::codec::id::Id {
         match self {
             Self::VP8 => ffmpeg::codec::id::Id::VP8,
@@ -104,6 +106,7 @@ fn calculate_network_quality(stats: &NetworkStats) -> f32 {
 }
 
 // Fixed VideoEncoder that properly initializes the encoder once
+#[cfg(feature = "ffmpeg")]
 pub struct VideoEncoder {
     encoder_name: String,
     scaler: ffmpeg::software::scaling::context::Context,
@@ -118,6 +121,13 @@ pub struct VideoEncoder {
     codec_type: CodecType,
 }
 
+#[cfg(not(feature = "ffmpeg"))]
+pub struct VideoEncoder {
+    width: u32,
+    height: u32,
+}
+
+#[cfg(feature = "ffmpeg")]
 impl VideoEncoder {
     pub fn new(config: EncoderConfig) -> Result<Self, CodecError> {
         // Initialize FFmpeg
@@ -423,6 +433,26 @@ impl VideoEncoder {
                 false
             }
         }
+    }
+}
+
+#[cfg(not(feature = "ffmpeg"))]
+impl VideoEncoder {
+    pub fn new(config: EncoderConfig) -> Result<Self, CodecError> {
+        warn!("FFmpeg feature disabled - video encoding not available");
+        Err(CodecError::Init("FFmpeg support not compiled in".to_string()))
+    }
+
+    pub fn encode_frame(&mut self, _rgba_data: &[u8], _force_keyframe: bool) -> Result<Vec<u8>, CodecError> {
+        Err(CodecError::Encode("FFmpeg support not compiled in".to_string()))
+    }
+
+    pub fn update_network_stats(&mut self, _stats: &NetworkStats) {
+        // No-op when FFmpeg is disabled
+    }
+
+    pub fn is_hardware_encoder_available(_codec_type: CodecType) -> bool {
+        false
     }
 }
 
