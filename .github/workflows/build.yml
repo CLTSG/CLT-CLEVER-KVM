@@ -44,7 +44,7 @@ jobs:
       - name: Setup FFmpeg
         uses: AnimMouse/setup-ffmpeg@v1
         with:
-          version: latest
+          version: master
 
       - name: Install dependencies (ubuntu only)
         if: inputs.platform == 'ubuntu-22.04'
