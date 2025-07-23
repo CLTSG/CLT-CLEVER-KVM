@@ -577,12 +577,23 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, _codec: String,
         info!("Client disconnected");
     });
     
-    // Process input events
-    tokio::spawn(async move {
+    // Process input events using spawn_blocking since InputHandler is not Send on macOS
+    tokio::task::spawn_blocking(move || {
         let mut handler = InputHandler::new();
-        while let Some(event) = input_rx.recv().await {
-            if let Err(e) = handler.handle_event(event) {
-                error!("Failed to handle input event: {}", e);
+        let rt = tokio::runtime::Handle::current();
+        
+        loop {
+            // Use blocking receive in the blocking task
+            match rt.block_on(input_rx.recv()) {
+                Some(event) => {
+                    if let Err(e) = handler.handle_event(event) {
+                        error!("Failed to handle input event: {}", e);
+                    }
+                },
+                None => {
+                    info!("Input channel closed, stopping input handler");
+                    break;
+                }
             }
         }
     });
@@ -1067,12 +1078,23 @@ async fn handle_legacy_socket_with_stop(
         info!("Client disconnected");
     });
     
-    // Process input events
-    tokio::spawn(async move {
+    // Process input events using spawn_blocking since InputHandler is not Send on macOS
+    tokio::task::spawn_blocking(move || {
         let mut handler = InputHandler::new();
-        while let Some(event) = input_rx.recv().await {
-            if let Err(e) = handler.handle_event(event) {
-                error!("Failed to handle input event: {}", e);
+        let rt = tokio::runtime::Handle::current();
+        
+        loop {
+            // Use blocking receive in the blocking task
+            match rt.block_on(input_rx.recv()) {
+                Some(event) => {
+                    if let Err(e) = handler.handle_event(event) {
+                        error!("Failed to handle input event: {}", e);
+                    }
+                },
+                None => {
+                    info!("Input channel closed, stopping input handler");
+                    break;
+                }
             }
         }
     });
