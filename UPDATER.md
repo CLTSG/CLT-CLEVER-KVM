@@ -113,7 +113,7 @@ git push origin v1.0.0
 
 ### Testing Update Flow
 
-1. **Build with current version** (e.g., 0.1.0):
+1. **Build with current version** (e.g., 1.0.0):
    ```bash
    npm run tauri:build
    ```
@@ -126,7 +126,7 @@ git push origin v1.0.0
    ```
 
 3. **Test the update**:
-   - Run the 0.1.0 version locally
+   - Run the 1.0.0 version locally
    - Click "Check for Updates" in the Status tab
    - The app should detect version 0.1.1 and offer to update
 
