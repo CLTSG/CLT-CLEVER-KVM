@@ -86,7 +86,7 @@ jobs:
       - name: Setup FFmpeg
         uses: AnimMouse/setup-ffmpeg@v1
         with:
-          version: ${{ matrix.platform == 'macos-latest' && '71' || 'master' }}
+          version: ${{ matrix.platform == 'macos-latest' && '71' || '7.1' }}
 
       - name: Install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
@@ -101,13 +101,13 @@ jobs:
       - name: Install dependencies (macOS only)
         if: matrix.platform == 'macos-latest'
         run: |
-          brew install pkg-config ffmpeg
-          # Verify FFmpeg installation
-          pkg-config --modversion libavutil || echo "FFmpeg pkg-config not found"
+          brew install pkg-config
+          # Don't install FFmpeg via brew - use AnimMouse/setup-ffmpeg only for cross-compilation
           # Set up environment for cross-compilation
           echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1" >> $GITHUB_ENV
+          echo "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1" >> $GITHUB_ENV
 
       - name: Install dependencies (Windows only)

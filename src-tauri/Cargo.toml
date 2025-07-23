@@ -42,8 +42,9 @@ dirs = "5.0.1"
 bytes = "1.5.0"
 gethostname = "0.4.3"
 
-# Use a more recent version of ffmpeg-next for better API stability
-ffmpeg-next = "7.0"
+# Use ffmpeg-sys-next version 7.1.0 for better compatibility
+ffmpeg-next = "7.1"
+ffmpeg-sys-next = "7.1.0"
 webrtc = "0.9.0"
 display-info = "0.4.3"
 anyhow = "1.0.75"
