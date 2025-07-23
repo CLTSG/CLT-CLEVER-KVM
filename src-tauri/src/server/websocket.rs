@@ -356,8 +356,6 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, _codec: String,
         }
     }
     
-    let input_handler = Arc::new(Mutex::new(input_handler));
-    
     // Get hostname
     let hostname = std::env::var("HOSTNAME")
         .unwrap_or_else(|_| "Unknown".to_string());
@@ -580,10 +578,9 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, _codec: String,
     });
     
     // Process input events
-    let input_handler_for_events = input_handler.clone();
     tokio::spawn(async move {
+        let mut handler = InputHandler::new();
         while let Some(event) = input_rx.recv().await {
-            let mut handler = input_handler_for_events.lock().await;
             if let Err(e) = handler.handle_event(event) {
                 error!("Failed to handle input event: {}", e);
             }
@@ -1011,9 +1008,6 @@ async fn handle_legacy_socket_with_stop(
     let (message_tx, mut message_rx) = mpsc::channel::<String>(100);
     let (input_tx, mut input_rx) = mpsc::channel::<InputEvent>(100);
     
-    // Initialize input handler
-    let input_handler = Arc::new(Mutex::new(InputHandler::new()));
-    
     // Create multiple receivers for the stop signal
     let mut stop_rx1 = stop_rx.resubscribe();
     let mut stop_rx2 = stop_rx.resubscribe();
@@ -1074,10 +1068,9 @@ async fn handle_legacy_socket_with_stop(
     });
     
     // Process input events
-    let input_handler_for_events = input_handler.clone();
     tokio::spawn(async move {
+        let mut handler = InputHandler::new();
         while let Some(event) = input_rx.recv().await {
-            let mut handler = input_handler_for_events.lock().await;
             if let Err(e) = handler.handle_event(event) {
                 error!("Failed to handle input event: {}", e);
             }
