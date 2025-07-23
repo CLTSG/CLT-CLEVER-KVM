@@ -1,7 +1,6 @@
 use crate::capture::ScreenCapture;
 use crate::input::{InputEvent, InputHandler};
 use crate::utils::EncryptionManager;
-#[cfg(feature = "ffmpeg")]
 use crate::codec::{VideoEncoder, EncoderConfig, CodecType}; // Add CodecType import
 use crate::audio::{AudioCapturer, AudioConfig}; // Add AudioConfig import
 use crate::server::webrtc_handler::{QualityProfile, StreamingControl, EncodedFrameMessage}; // Add WebRTC imports

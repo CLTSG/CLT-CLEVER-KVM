@@ -41,54 +41,32 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
-      - name: Cache vcpkg (Windows only)
-        if: inputs.platform == 'windows-latest'
-        uses: actions/cache@v4
+      - name: Setup FFmpeg
+        uses: AnimMouse/setup-ffmpeg@v1
         with:
-          path: C:\vcpkg
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('**/vcpkg.json') }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-
+          version: latest
 
       - name: Install dependencies (ubuntu only)
         if: inputs.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libxdo-dev libxrandr-dev libxcb-randr0-dev
-          sudo apt-get install -y ffmpeg libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev pkg-config
-          # Verify installation
-          pkg-config --modversion libavutil
-          pkg-config --libs libavutil
+          sudo apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libxdo-dev libxrandr-dev libxcb-randr0-dev pkg-config
 
       - name: Install dependencies (macOS only)
         if: inputs.platform == 'macos-latest'
         run: |
-          brew install ffmpeg pkg-config
-          # Verify installation
-          pkg-config --modversion libavutil
-          pkg-config --libs libavutil
+          brew install pkg-config
+          # Set up environment for cross-compilation
+          echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> $GITHUB_ENV
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
+          echo "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1" >> $GITHUB_ENV
+          echo "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1" >> $GITHUB_ENV
 
       - name: Install dependencies (Windows only)
         if: inputs.platform == 'windows-latest'
         run: |
-          # Check if vcpkg is cached, if not install it
-          if (-not (Test-Path "C:\vcpkg\vcpkg.exe")) {
-            Write-Host "Installing vcpkg..."
-            git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
-            cd C:\vcpkg
-            .\bootstrap-vcpkg.bat
-            .\vcpkg.exe integrate install
-          } else {
-            Write-Host "Using cached vcpkg installation"
-            cd C:\vcpkg
-          }
-          # Install ffmpeg with all required components
-          .\vcpkg.exe install ffmpeg[avcodec,avformat,avdevice,avfilter,swresample,swscale]:x64-windows
-          # Set environment variables
-          echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
-          echo "PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig" >> $env:GITHUB_ENV
-          # Verify installation
-          Get-ChildItem "C:\vcpkg\installed\x64-windows\lib\pkgconfig\libav*.pc" | Select-Object Name
+          # FFmpeg is already installed by setup-ffmpeg action
+          echo "FFmpeg installed via setup-ffmpeg action"
 
       - name: Install frontend dependencies
         run: npm ci
