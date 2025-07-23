@@ -333,10 +333,7 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, _codec: String,
         None
     };
     
-    // Setup input handler with monitor information
-    let mut input_handler = InputHandler::new();
-    
-    // Configure input handler with monitor positions
+    // Store monitor configurations for later use in input handler
     let monitor_configs: Vec<(String, i32, i32, i32, i32)> = available_monitors.iter()
         .map(|m| (
             m.id.clone(),
@@ -347,14 +344,9 @@ async fn handle_legacy_socket(socket: WebSocket, monitor: usize, _codec: String,
         ))
         .collect();
     
-    input_handler.update_monitors(monitor_configs);
-    
-    // Set active monitor
-    if let Some(monitor) = available_monitors.get(monitor_index) {
-        if let Err(e) = input_handler.set_active_monitor(&monitor.id) {
-            warn!("Failed to set active monitor: {}", e);
-        }
-    }
+    // Store active monitor ID for later use
+    let active_monitor_id = available_monitors.get(monitor_index)
+        .map(|m| m.id.clone());
     
     // Get hostname
     let hostname = std::env::var("HOSTNAME")
@@ -809,6 +801,21 @@ async fn handle_legacy_socket_with_stop(
         available_monitors.iter().position(|m| m.is_primary).unwrap_or(0)
     };
     
+    // Store monitor configurations for later use in input handler
+    let monitor_configs_2: Vec<(String, i32, i32, i32, i32)> = available_monitors.iter()
+        .map(|m| (
+            m.id.clone(),
+            m.position_x,
+            m.position_y,
+            m.width as i32,
+            m.height as i32
+        ))
+        .collect();
+    
+    // Store active monitor ID for later use
+    let active_monitor_id_2 = available_monitors.get(monitor_index)
+        .map(|m| m.id.clone());
+    
     // Setup screen capture in a separate thread with stop signal
     let initial_codec = codec.clone();
     let screen_handle = std::thread::spawn(move || {
@@ -1081,6 +1088,17 @@ async fn handle_legacy_socket_with_stop(
     // Process input events using spawn_blocking since InputHandler is not Send on macOS
     tokio::task::spawn_blocking(move || {
         let mut handler = InputHandler::new();
+        
+        // Configure the input handler with monitor information
+        handler.update_monitors(monitor_configs_2);
+        
+        // Set active monitor if we have one
+        if let Some(monitor_id) = active_monitor_id_2 {
+            if let Err(e) = handler.set_active_monitor(&monitor_id) {
+                warn!("Failed to set active monitor: {}", e);
+            }
+        }
+        
         let rt = tokio::runtime::Handle::current();
         
         loop {
