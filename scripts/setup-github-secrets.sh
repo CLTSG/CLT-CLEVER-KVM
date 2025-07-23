@@ -13,7 +13,7 @@ echo ""
 if [ ! -f "$HOME/.tauri/clever-kvm.key" ]; then
     echo "❌ Private key not found at $HOME/.tauri/clever-kvm.key"
     echo "Please run the following command first:"
-    echo "  npx tauri signer generate -w ~/.tauri/clever-kvm.key --password YOUR_PASSWORD --force"
+    echo "  npx tauri signer generate -w ~/.tauri/clever-kvm.key --password Enter_Password --force"
     exit 1
 fi
 
@@ -35,7 +35,7 @@ echo "$PRIVATE_KEY_CONTENT"
 echo "   -------- END PRIVATE KEY --------"
 echo ""
 echo "2. TAURI_KEY_PASSWORD"
-echo "   Value: test123"
+echo "   Value: Enter_Password"
 echo ""
 
 echo "📖 How to add these secrets:"
@@ -46,7 +46,7 @@ echo "2. Click on 'Settings' tab"
 echo "3. Click on 'Secrets and variables' → 'Actions' in the left sidebar"
 echo "4. Click 'New repository secret'"
 echo "5. Add 'TAURI_PRIVATE_KEY' with the private key content above"
-echo "6. Add 'TAURI_KEY_PASSWORD' with value: test123"
+echo "6. Add 'TAURI_KEY_PASSWORD' with value: Enter_Password"
 echo ""
 
 echo "⚠️  Security Note:"

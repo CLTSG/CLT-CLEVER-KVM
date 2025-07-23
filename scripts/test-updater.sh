@@ -18,7 +18,7 @@ fi
 # Check if keys exist
 if [ ! -f "$HOME/.tauri/clever-kvm.key" ]; then
     echo "❌ Private key not found. Run this first:"
-    echo "  npx tauri signer generate -w ~/.tauri/clever-kvm.key --password test123 --force"
+    echo "  npx tauri signer generate -w ~/.tauri/clever-kvm.key --password Enter_Password --force"
     exit 1
 fi
 
@@ -59,7 +59,7 @@ echo "🏗️  Building application with updater..."
 
 # Set environment variables for signing
 export TAURI_PRIVATE_KEY="$HOME/.tauri/clever-kvm.key"
-export TAURI_KEY_PASSWORD="test123"
+export TAURI_KEY_PASSWORD="Enter_Password"
 
 # Build the application
 npm install
