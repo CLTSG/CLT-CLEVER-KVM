@@ -44,7 +44,7 @@ jobs:
       - name: Setup FFmpeg
         uses: AnimMouse/setup-ffmpeg@v1
         with:
-          version: ${{ inputs.platform == 'macos-latest' && '7.1' || 'master' }}
+          version: ${{ inputs.platform == 'macos-latest' && '71' || 'master' }}
 
       - name: Install dependencies (ubuntu only)
         if: inputs.platform == 'ubuntu-22.04'
