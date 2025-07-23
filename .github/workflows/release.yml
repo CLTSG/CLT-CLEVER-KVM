@@ -93,11 +93,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libxdo-dev libxrandr-dev libxcb-randr0-dev pkg-config
+          # Install FFmpeg development libraries for Rust compilation
+          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev
+          # Verify FFmpeg installation
+          pkg-config --modversion libavutil || echo "FFmpeg pkg-config not found"
 
       - name: Install dependencies (macOS only)
         if: matrix.platform == 'macos-latest'
         run: |
-          brew install pkg-config
+          brew install pkg-config ffmpeg
+          # Verify FFmpeg installation
+          pkg-config --modversion libavutil || echo "FFmpeg pkg-config not found"
           # Set up environment for cross-compilation
           echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
@@ -107,8 +113,16 @@ jobs:
       - name: Install dependencies (Windows only)
         if: matrix.platform == 'windows-latest'
         run: |
-          # FFmpeg is already installed by setup-ffmpeg action
-          echo "FFmpeg installed via setup-ffmpeg action"
+          # Install vcpkg for FFmpeg development libraries
+          git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+          cd C:\vcpkg
+          .\bootstrap-vcpkg.bat
+          .\vcpkg.exe integrate install
+          # Install FFmpeg with all required components
+          .\vcpkg.exe install ffmpeg[core,avcodec,avformat,avdevice,avfilter,swresample,swscale]:x64-windows
+          # Set environment variables
+          echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
+          echo "PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig" >> $env:GITHUB_ENV
 
       - name: Install frontend dependencies
         run: npm ci
