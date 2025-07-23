@@ -96,6 +96,9 @@ jobs:
       - name: Build the app (Release)
         if: ${{ !inputs.debug }}
         env:
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PKG_CONFIG_ALLOW_SYSTEM_LIBS: 1
           PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: 1
         run: npm run tauri:build
@@ -103,12 +106,19 @@ jobs:
       - name: Build the app (Debug)
         if: ${{ inputs.debug }}
         env:
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PKG_CONFIG_ALLOW_SYSTEM_LIBS: 1
           PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: 1
         run: npm run tauri:build:debug
 
       - name: Upload artifacts (Linux)
         if: inputs.platform == 'ubuntu-22.04'
+        env:
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         uses: actions/upload-artifact@v4
         with:
           name: clever-kvm-linux
@@ -119,6 +129,10 @@ jobs:
 
       - name: Upload artifacts (Windows)
         if: inputs.platform == 'windows-latest'
+        env:
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         uses: actions/upload-artifact@v4
         with:
           name: clever-kvm-windows
@@ -129,6 +143,10 @@ jobs:
 
       - name: Upload artifacts (macOS)
         if: inputs.platform == 'macos-latest'
+        env:
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         uses: actions/upload-artifact@v4
         with:
           name: clever-kvm-macos
