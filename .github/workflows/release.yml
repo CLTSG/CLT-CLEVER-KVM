@@ -87,7 +87,7 @@ jobs:
         uses: FedericoCarboni/setup-ffmpeg@v3
         with:
           ffmpeg-version: release
-          architecture: ${{ runner.arch }}
+          architecture: 'x64'
           linking-type: static
 
       - name: Install dependencies (ubuntu only)
@@ -99,6 +99,9 @@ jobs:
           sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev
           # Verify FFmpeg installation
           pkg-config --modversion libavutil || echo "FFmpeg pkg-config not found"
+          # Create empty libs directory to satisfy tauri.conf.json resources
+          mkdir -p src-tauri/libs
+          touch src-tauri/libs/.gitkeep
 
       - name: Install dependencies (macOS only)
         if: matrix.platform == 'macos-latest'
@@ -121,6 +124,10 @@ jobs:
           pkg-config --modversion libavutil || echo "pkg-config libavutil failed"
           ls -la /opt/homebrew/lib/pkgconfig/libav* || echo "No arm64 FFmpeg pkg-config files"
           ls -la /usr/local/lib/pkgconfig/libav* || echo "No x86_64 FFmpeg pkg-config files"
+          
+          # Create empty libs directory to satisfy tauri.conf.json resources
+          mkdir -p src-tauri/libs
+          touch src-tauri/libs/.gitkeep
 
       - name: Install dependencies (Windows only)
         if: matrix.platform == 'windows-latest'
