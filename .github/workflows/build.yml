@@ -57,9 +57,6 @@ jobs:
           sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev
           # Verify FFmpeg installation
           pkg-config --modversion libavutil || echo "FFmpeg pkg-config not found"
-          # Create empty libs directory to satisfy tauri.conf.json resources
-          mkdir -p src-tauri/libs
-          touch src-tauri/libs/.gitkeep
 
       - name: Install dependencies (macOS only)
         if: inputs.platform == 'macos-latest'
@@ -82,10 +79,6 @@ jobs:
           pkg-config --modversion libavutil || echo "pkg-config libavutil failed"
           ls -la /opt/homebrew/lib/pkgconfig/libav* || echo "No arm64 FFmpeg pkg-config files"
           ls -la /usr/local/lib/pkgconfig/libav* || echo "No x86_64 FFmpeg pkg-config files"
-          
-          # Create empty libs directory to satisfy tauri.conf.json resources
-          mkdir -p src-tauri/libs
-          touch src-tauri/libs/.gitkeep
 
       - name: Install dependencies (Windows only)
         if: inputs.platform == 'windows-latest'
@@ -100,9 +93,6 @@ jobs:
           # Set environment variables
           echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
           echo "PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig" >> $env:GITHUB_ENV
-          # Copy FFmpeg DLLs to be bundled with the app
-          New-Item -ItemType Directory -Force -Path "src-tauri\libs"
-          Copy-Item "C:\vcpkg\installed\x64-windows\bin\*.dll" -Destination "src-tauri\libs\" -Force
 
       - name: Install frontend dependencies
         run: npm ci
