@@ -52,7 +52,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest'
+          - platform: 'macos-14-arm64'
             args: '--target universal-apple-darwin'
             rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
           - platform: 'ubuntu-22.04'
@@ -101,7 +101,7 @@ jobs:
           pkg-config --modversion libavutil || echo "FFmpeg pkg-config not found"
 
       - name: Install dependencies (macOS only)
-        if: matrix.platform == 'macos-latest'
+        if: matrix.platform == 'macos-14-arm64'
         run: |
           # Install both x86_64 and arm64 versions of FFmpeg
           arch -x86_64 brew install pkg-config || brew install pkg-config
@@ -151,7 +151,7 @@ jobs:
           PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: 1
           PKG_CONFIG_ALLOW_CROSS: 1
           # macOS specific environment for universal builds
-          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.platform == 'macos-latest' && '10.13' || '' }}
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.platform == 'macos-14-arm64' && '10.13' || '' }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
