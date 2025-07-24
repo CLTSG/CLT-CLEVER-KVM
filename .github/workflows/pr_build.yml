@@ -1,6 +1,10 @@
-name: Manual Build
+name: Pull Request Build
 
 on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       platform:
@@ -20,7 +24,15 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ inputs.platform }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Only use matrix for automatic builds (PR/push), not for manual dispatch
+        platform: ${{ github.event_name == 'workflow_dispatch' && fromJSON('[""]') || fromJSON('["ubuntu-22.04", "windows-2022", "macos-latest"]') }}
+        exclude:
+          # Exclude empty platform when using manual dispatch
+          - platform: ""
     
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +46,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ inputs.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -49,7 +61,7 @@ jobs:
           linking-type: static
 
       - name: Install dependencies (ubuntu only)
-        if: inputs.platform == 'ubuntu-22.04'
+        if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libxdo-dev libxrandr-dev libxcb-randr0-dev pkg-config
@@ -59,7 +71,7 @@ jobs:
           pkg-config --modversion libavutil || echo "FFmpeg pkg-config not found"
 
       - name: Install dependencies (macOS only)
-        if: inputs.platform == 'macos-latest'
+        if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'macos-latest'
         run: |
           # Install both x86_64 and arm64 versions of FFmpeg
           arch -x86_64 brew install pkg-config || brew install pkg-config
@@ -81,7 +93,7 @@ jobs:
           ls -la /usr/local/lib/pkgconfig/libav* || echo "No x86_64 FFmpeg pkg-config files"
 
       - name: Install dependencies (Windows only)
-        if: inputs.platform == 'windows-2022'
+        if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'windows-2022'
         run: |
           # Install vcpkg for FFmpeg development libraries
           git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
@@ -98,7 +110,7 @@ jobs:
         run: npm ci
 
       - name: Build the app (Release)
-        if: ${{ !inputs.debug }}
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.debug || github.event_name != 'workflow_dispatch' }}
         env:
           RUSTFLAGS: ${{ env.RUSTFLAGS }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
@@ -109,7 +121,7 @@ jobs:
         run: npm run tauri:build
 
       - name: Build the app (Debug)
-        if: ${{ inputs.debug }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug }}
         env:
           RUSTFLAGS: ${{ env.RUSTFLAGS }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
@@ -120,7 +132,7 @@ jobs:
         run: npm run tauri:build:debug
 
       - name: Upload artifacts (Linux)
-        if: inputs.platform == 'ubuntu-22.04'
+        if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'ubuntu-22.04'
         env:
           RUSTFLAGS: ${{ env.RUSTFLAGS }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
@@ -135,7 +147,7 @@ jobs:
             src-tauri/target/release/clever-kvm
 
       - name: Upload artifacts (Windows)
-        if: inputs.platform == 'windows-2022'
+        if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'windows-2022'
         env:
           RUSTFLAGS: ${{ env.RUSTFLAGS }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
@@ -150,7 +162,7 @@ jobs:
             src-tauri/target/release/clever-kvm.exe
 
       - name: Upload artifacts (macOS)
-        if: inputs.platform == 'macos-latest'
+        if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'macos-latest'
         env:
           RUSTFLAGS: ${{ env.RUSTFLAGS }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
