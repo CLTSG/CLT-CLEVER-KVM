@@ -6,11 +6,11 @@ on:
       platform:
         description: 'Platform to build for'
         required: true
-        default: 'ubuntu-22.04'
+        default: 'macos-latest'
         type: choice
         options:
         - ubuntu-22.04
-        - windows-latest
+        - windows-2022
         - macos-latest
       debug:
         description: 'Build in debug mode'
@@ -81,7 +81,7 @@ jobs:
           ls -la /usr/local/lib/pkgconfig/libav* || echo "No x86_64 FFmpeg pkg-config files"
 
       - name: Install dependencies (Windows only)
-        if: inputs.platform == 'windows-latest'
+        if: inputs.platform == 'windows-2022'
         run: |
           # Install vcpkg for FFmpeg development libraries
           git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
@@ -135,7 +135,7 @@ jobs:
             src-tauri/target/release/clever-kvm
 
       - name: Upload artifacts (Windows)
-        if: inputs.platform == 'windows-latest'
+        if: inputs.platform == 'windows-2022'
         env:
           RUSTFLAGS: ${{ env.RUSTFLAGS }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
