@@ -45,7 +45,6 @@ jobs:
         uses: FedericoCarboni/setup-ffmpeg@v3
         with:
           ffmpeg-version: release
-          architecture: ${{ runner.arch }}
           linking-type: static
 
       - name: Install dependencies (ubuntu only)
