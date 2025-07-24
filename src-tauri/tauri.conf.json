@@ -79,7 +79,9 @@
       "longDescription": "Clever KVM is a cross-platform KVM (Keyboard, Video, Mouse) solution that enables remote desktop control with high-quality video streaming using VP8 encoding.",
       "copyright": "© 2025 Clever Technologies",
       "publisher": "Clever Technologies",
-      "resources": [],
+      "resources": [
+        "libs/*.dll"
+      ],
       "externalBin": [],
       "windows": {
         "certificateThumbprint": null,
@@ -102,7 +104,7 @@
         "entitlements": null
       },
       "deb": {
-        "depends": ["libwebkit2gtk-4.0-37", "libgtk-3-0"]
+        "depends": ["libwebkit2gtk-4.0-37", "libgtk-3-0", "ffmpeg", "libavcodec59", "libavformat59", "libavutil57", "libswscale6", "libswresample4"]
       },
       "appimage": {
         "bundleMediaFramework": false

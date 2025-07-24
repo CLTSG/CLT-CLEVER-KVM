@@ -80,6 +80,9 @@ jobs:
           # Set environment variables
           echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
           echo "PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig" >> $env:GITHUB_ENV
+          # Copy FFmpeg DLLs to be bundled with the app
+          New-Item -ItemType Directory -Force -Path "src-tauri\libs"
+          Copy-Item "C:\vcpkg\installed\x64-windows\bin\*.dll" -Destination "src-tauri\libs\" -Force
 
       - name: Install frontend dependencies
         run: npm ci
