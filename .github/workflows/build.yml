@@ -6,12 +6,12 @@ on:
       platform:
         description: 'Platform to build for'
         required: true
-        default: 'ubuntu-22.04'
+        default: 'macos-14-arm64'
         type: choice
         options:
         - ubuntu-22.04
         - windows-2022
-        - macos-latest
+        - macos-14-arm64
       debug:
         description: 'Build in debug mode'
         required: false
@@ -34,7 +34,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ inputs.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ inputs.platform == 'macos-14-arm64' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -59,7 +59,7 @@ jobs:
           pkg-config --modversion libavutil || echo "FFmpeg pkg-config not found"
 
       - name: Install dependencies (macOS only)
-        if: inputs.platform == 'macos-latest'
+        if: inputs.platform == 'macos-14-arm64'
         run: |
           # Install both x86_64 and arm64 versions of FFmpeg
           arch -x86_64 brew install pkg-config || brew install pkg-config
@@ -150,7 +150,7 @@ jobs:
             src-tauri/target/release/clever-kvm.exe
 
       - name: Upload artifacts (macOS)
-        if: inputs.platform == 'macos-latest'
+        if: inputs.platform == 'macos-14-arm64'
         env:
           RUSTFLAGS: ${{ env.RUSTFLAGS }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}

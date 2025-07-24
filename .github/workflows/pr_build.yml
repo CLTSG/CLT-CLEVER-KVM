@@ -15,7 +15,7 @@ on:
         options:
         - ubuntu-22.04
         - windows-2022
-        - macos-latest
+        - macos-14-arm64
       debug:
         description: 'Build in debug mode'
         required: false
@@ -29,7 +29,7 @@ jobs:
       fail-fast: false
       matrix:
         # Only use matrix for automatic builds (PR/push), not for manual dispatch
-        platform: ${{ github.event_name == 'workflow_dispatch' && fromJSON('[""]') || fromJSON('["ubuntu-22.04", "windows-2022", "macos-latest"]') }}
+        platform: ${{ github.event_name == 'workflow_dispatch' && fromJSON('[""]') || fromJSON('["ubuntu-22.04", "windows-2022", "macos-14-arm64"]') }}
         exclude:
           # Exclude empty platform when using manual dispatch
           - platform: ""
@@ -46,7 +46,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'macos-14-arm64' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -71,7 +71,7 @@ jobs:
           pkg-config --modversion libavutil || echo "FFmpeg pkg-config not found"
 
       - name: Install dependencies (macOS only)
-        if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'macos-latest'
+        if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'macos-14-arm64'
         run: |
           # Install both x86_64 and arm64 versions of FFmpeg
           arch -x86_64 brew install pkg-config || brew install pkg-config
@@ -162,7 +162,7 @@ jobs:
             src-tauri/target/release/clever-kvm.exe
 
       - name: Upload artifacts (macOS)
-        if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'macos-latest'
+        if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'macos-14-arm64'
         env:
           RUSTFLAGS: ${{ env.RUSTFLAGS }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
