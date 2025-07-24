@@ -42,9 +42,11 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Setup FFmpeg
-        uses: AnimMouse/setup-ffmpeg@v1
+        uses: FedericoCarboni/setup-ffmpeg@v3
         with:
-          version: ${{ inputs.platform == 'macos-latest' && '71' || '7.1' }}
+          ffmpeg-version: release
+          architecture: ${{ runner.arch }}
+          linking-type: static
 
       - name: Install dependencies (ubuntu only)
         if: inputs.platform == 'ubuntu-22.04'
@@ -59,13 +61,24 @@ jobs:
       - name: Install dependencies (macOS only)
         if: inputs.platform == 'macos-latest'
         run: |
-          brew install pkg-config
-          # Don't install FFmpeg via brew - use AnimMouse/setup-ffmpeg only for cross-compilation
+          # Install both x86_64 and arm64 versions of FFmpeg
+          arch -x86_64 brew install pkg-config || brew install pkg-config
+          arch -arm64 brew install ffmpeg || echo "arm64 ffmpeg install failed"
+          arch -x86_64 brew install ffmpeg || echo "x86_64 ffmpeg install failed"
+          
           # Set up environment for cross-compilation
           echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1" >> $GITHUB_ENV
+          
+          # Set PKG_CONFIG_PATH to include both architectures
+          echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig" >> $GITHUB_ENV
+          
+          # Verify installation
+          pkg-config --modversion libavutil || echo "pkg-config libavutil failed"
+          ls -la /opt/homebrew/lib/pkgconfig/libav* || echo "No arm64 FFmpeg pkg-config files"
+          ls -la /usr/local/lib/pkgconfig/libav* || echo "No x86_64 FFmpeg pkg-config files"
 
       - name: Install dependencies (Windows only)
         if: inputs.platform == 'windows-latest'
