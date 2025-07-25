@@ -110,35 +110,20 @@ jobs:
       - name: Install dependencies (macOS only)
         if: matrix.platform == 'macos-14'
         run: |
-          # Install pkg-config and FFmpeg for development headers
-          brew install pkg-config ffmpeg
+          # Install pkg-config for cross-compilation
+          brew install pkg-config
           
           # Set up environment for cross-compilation
           echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1" >> $GITHUB_ENV
-          
-          # Set PKG_CONFIG_PATH to include both Homebrew and AnimMouse FFmpeg
-          echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
-          
-          # Verify FFmpeg installation
-          pkg-config --modversion libavutil || echo "libavutil not found via pkg-config"
-          pkg-config --libs libavutil || echo "libavutil libs not found"
 
       - name: Install dependencies (Windows only)
         if: matrix.platform == 'windows-2022'
         run: |
-          # Install vcpkg for FFmpeg development libraries
-          git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
-          cd C:\vcpkg
-          .\bootstrap-vcpkg.bat
-          .\vcpkg.exe integrate install
-          # Install FFmpeg with all required components
-          .\vcpkg.exe install ffmpeg[core,avcodec,avformat,avdevice,avfilter,swresample,swscale]:x64-windows
-          # Set environment variables
-          echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
-          echo "PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig" >> $env:GITHUB_ENV
+          # FedericoCarboni/setup-ffmpeg handles FFmpeg installation
+          echo "FFmpeg handled by setup-ffmpeg action"
 
       - name: Install frontend dependencies
         run: npm ci
