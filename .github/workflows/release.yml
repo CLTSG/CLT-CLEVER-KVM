@@ -53,8 +53,8 @@ jobs:
       matrix:
         include:
           - platform: 'macos-14'
-            args: '--target universal-apple-darwin'
-            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+            args: ''
+            rust-targets: ''
           - platform: 'ubuntu-22.04'
             args: ''
             rust-targets: ''
