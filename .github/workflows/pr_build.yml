@@ -61,9 +61,12 @@ jobs:
           cd C:\vcpkg
           .\bootstrap-vcpkg.bat
           .\vcpkg.exe integrate install
-          .\vcpkg.exe install ffmpeg[core,avcodec,avformat,avdevice,avfilter,swresample,swscale]:x64-windows-static
+          # Install pkg-config first, then FFmpeg with standard triplet
+          .\vcpkg.exe install pkgconf:x64-windows
+          .\vcpkg.exe install ffmpeg[core,avcodec,avformat,avdevice,avfilter,swresample,swscale]:x64-windows
           echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
-          echo "PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows-static\lib\pkgconfig" >> $env:GITHUB_ENV
+          echo "PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig" >> $env:GITHUB_ENV
+          echo "PATH=C:\vcpkg\installed\x64-windows\tools\pkgconf;$env:PATH" >> $env:GITHUB_ENV
 
       - name: Setup FFmpeg (Linux)
         if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'ubuntu-22.04'
