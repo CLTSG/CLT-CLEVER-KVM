@@ -83,36 +83,39 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
+      - name: Setup FFmpeg (Windows)
+        if: matrix.platform == 'windows-2022'
+        run: |
+          # Install vcpkg and FFmpeg (what ffmpeg-sys-next expects on Windows)
+          git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+          cd C:\vcpkg
+          .\bootstrap-vcpkg.bat
+          .\vcpkg.exe integrate install
+          .\vcpkg.exe install ffmpeg[core,avcodec,avformat,avdevice,avfilter,swresample,swscale]:x64-windows-static
+          echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
+          echo "PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows-static\lib\pkgconfig" >> $env:GITHUB_ENV
+
+      - name: Setup FFmpeg (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config
+          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev
+
       - name: Setup FFmpeg (macOS)
         if: matrix.platform == 'macos-14'
-        uses: AnimMouse/setup-ffmpeg@v1
-        with:
-          version: 71
-
-      - name: Setup FFmpeg (Windows/Linux)
-        if: matrix.platform != 'macos-14'
-        uses: FedericoCarboni/setup-ffmpeg@v3
-        with:
-          ffmpeg-version: release
-          architecture: 'x64'
-          linking-type: static
+        run: |
+          brew install pkg-config ffmpeg
 
       - name: Install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libxdo-dev libxrandr-dev libxcb-randr0-dev pkg-config
-          # Install FFmpeg development libraries for Rust compilation
-          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev
-          # Verify FFmpeg installation
-          pkg-config --modversion libavutil || echo "FFmpeg pkg-config not found"
+          sudo apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libxdo-dev libxrandr-dev libxcb-randr0-dev
 
       - name: Install dependencies (macOS only)
         if: matrix.platform == 'macos-14'
         run: |
-          # Install pkg-config for cross-compilation
-          brew install pkg-config
-          
           # Set up environment for cross-compilation
           echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
@@ -122,8 +125,7 @@ jobs:
       - name: Install dependencies (Windows only)
         if: matrix.platform == 'windows-2022'
         run: |
-          # FedericoCarboni/setup-ffmpeg handles FFmpeg installation
-          echo "FFmpeg handled by setup-ffmpeg action"
+          echo "Windows dependencies handled by vcpkg"
 
       - name: Install frontend dependencies
         run: npm ci
