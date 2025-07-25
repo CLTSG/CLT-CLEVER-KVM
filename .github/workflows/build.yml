@@ -6,12 +6,12 @@ on:
       platform:
         description: 'Platform to build for'
         required: true
-        default: 'macos-14-arm64'
+        default: 'macos-14'
         type: choice
         options:
         - ubuntu-22.04
         - windows-2022
-        - macos-14-arm64
+        - macos-14
       debug:
         description: 'Build in debug mode'
         required: false
@@ -34,14 +34,21 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ inputs.platform == 'macos-14-arm64' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ inputs.platform == 'macos-14' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
 
-      - name: Setup FFmpeg
+      - name: Setup FFmpeg (macOS)
+        if: inputs.platform == 'macos-14'
+        uses: AnimMouse/setup-ffmpeg@v1
+        with:
+          version: 71
+
+      - name: Setup FFmpeg (Windows/Linux)
+        if: inputs.platform != 'macos-14'
         uses: FedericoCarboni/setup-ffmpeg@v3
         with:
           ffmpeg-version: release
@@ -59,7 +66,7 @@ jobs:
           pkg-config --modversion libavutil || echo "FFmpeg pkg-config not found"
 
       - name: Install dependencies (macOS only)
-        if: inputs.platform == 'macos-14-arm64'
+        if: inputs.platform == 'macos-14'
         run: |
           # Install both x86_64 and arm64 versions of FFmpeg
           arch -x86_64 brew install pkg-config || brew install pkg-config
@@ -150,7 +157,7 @@ jobs:
             src-tauri/target/release/clever-kvm.exe
 
       - name: Upload artifacts (macOS)
-        if: inputs.platform == 'macos-14-arm64'
+        if: inputs.platform == 'macos-14'
         env:
           RUSTFLAGS: ${{ env.RUSTFLAGS }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}

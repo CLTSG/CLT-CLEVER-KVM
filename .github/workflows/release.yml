@@ -52,7 +52,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-14-arm64'
+          - platform: 'macos-14'
             args: '--target universal-apple-darwin'
             rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
           - platform: 'ubuntu-22.04'
@@ -83,7 +83,14 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
-      - name: Setup FFmpeg
+      - name: Setup FFmpeg (macOS)
+        if: matrix.platform == 'macos-14'
+        uses: AnimMouse/setup-ffmpeg@v1
+        with:
+          version: 71
+
+      - name: Setup FFmpeg (Windows/Linux)
+        if: matrix.platform != 'macos-14'
         uses: FedericoCarboni/setup-ffmpeg@v3
         with:
           ffmpeg-version: release
