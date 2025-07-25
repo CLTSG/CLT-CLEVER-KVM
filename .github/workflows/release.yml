@@ -53,8 +53,8 @@ jobs:
       matrix:
         include:
           - platform: 'macos-14'
-            args: '--target universal-apple-darwin'
-            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+            args: ''
+            rust-targets: ''
           - platform: 'ubuntu-22.04'
             args: ''
             rust-targets: ''
@@ -108,12 +108,10 @@ jobs:
           pkg-config --modversion libavutil || echo "FFmpeg pkg-config not found"
 
       - name: Install dependencies (macOS only)
-        if: matrix.platform == 'macos-14-arm64'
+        if: matrix.platform == 'macos-14'
         run: |
-          # Install both x86_64 and arm64 versions of FFmpeg
-          arch -x86_64 brew install pkg-config || brew install pkg-config
-          arch -arm64 brew install ffmpeg || echo "arm64 ffmpeg install failed"
-          arch -x86_64 brew install ffmpeg || echo "x86_64 ffmpeg install failed"
+          # Install pkg-config and FFmpeg for development headers
+          brew install pkg-config ffmpeg
           
           # Set up environment for cross-compilation
           echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> $GITHUB_ENV
@@ -121,13 +119,12 @@ jobs:
           echo "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1" >> $GITHUB_ENV
           
-          # Set PKG_CONFIG_PATH to include both architectures
-          echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig" >> $GITHUB_ENV
+          # Set PKG_CONFIG_PATH to include both Homebrew and AnimMouse FFmpeg
+          echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
           
-          # Verify installation
-          pkg-config --modversion libavutil || echo "pkg-config libavutil failed"
-          ls -la /opt/homebrew/lib/pkgconfig/libav* || echo "No arm64 FFmpeg pkg-config files"
-          ls -la /usr/local/lib/pkgconfig/libav* || echo "No x86_64 FFmpeg pkg-config files"
+          # Verify FFmpeg installation
+          pkg-config --modversion libavutil || echo "libavutil not found via pkg-config"
+          pkg-config --libs libavutil || echo "libavutil libs not found"
 
       - name: Install dependencies (Windows only)
         if: matrix.platform == 'windows-2022'
@@ -158,7 +155,7 @@ jobs:
           PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: 1
           PKG_CONFIG_ALLOW_CROSS: 1
           # macOS specific environment for universal builds
-          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.platform == 'macos-14-arm64' && '10.13' || '' }}
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.platform == 'macos-14' && '10.13' || '' }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
