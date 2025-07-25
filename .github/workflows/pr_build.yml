@@ -170,7 +170,6 @@ jobs:
 
       - name: Upload artifacts (macOS)
         if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'macos-14-arm64'
-        if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'macos-14-arm64'
         env:
           RUSTFLAGS: ${{ env.RUSTFLAGS }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
