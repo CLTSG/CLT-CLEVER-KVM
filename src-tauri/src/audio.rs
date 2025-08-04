@@ -4,13 +4,14 @@ use webrtc::api::APIBuilder;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::RTCPeerConnection;
-use webrtc::peer_connection::policy::ice_transport_policy::RTCIceTransportPolicy; // Fix import
+use webrtc::peer_connection::policy::ice_transport_policy::RTCIceTransportPolicy;
 use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecCapability, RTPCodecType, RTCRtpCodecParameters};
 use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 use webrtc::track::track_local::TrackLocal;
+use webrtc::media::Sample;
 use log::{debug, error, info, warn};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::SystemTime;
+use std::time::{SystemTime, Duration};
 
 pub struct AudioConfig {
     pub sample_rate: u32,
@@ -70,29 +71,16 @@ impl AudioCapturer {
         // Create a MediaEngine object to configure the supported codec
         let mut m = MediaEngine::default();
         
-        // Setup the Opus codec with improved quality parameters
-        let opus_codec = RTCRtpCodecParameters {
-            capability: RTCRtpCodecCapability {
-                mime_type: MIME_TYPE_OPUS.to_string(),
-                clock_rate: self.sample_rate,
-                channels: self.channels as u16,
-                sdp_fmtp_line: format!("minptime=10;useinbandfec=1;stereo={}",
-                                      if self.channels > 1 { "1" } else { "0" }),
-                rtcp_feedback: vec![],
-            },
-            payload_type: 111,
-            ..Default::default()
-        };
-        
-        m.register_codec(opus_codec, RTPCodecType::Audio)
-            .map_err(|e| format!("Failed to register Opus codec: {}", e))?;
+        // Register Opus codec for audio
+        m.register_default_codecs()
+            .map_err(|e| format!("Failed to register default codecs: {}", e))?;
         
         // Create the API object with the MediaEngine
         let api = APIBuilder::new()
             .with_media_engine(m)
             .build();
         
-        // Create a new RTCPeerConnection with improved ICE servers
+        // Create a new RTCPeerConnection with STUN servers
         let config = RTCConfiguration {
             ice_servers: vec![
                 RTCIceServer {
@@ -112,7 +100,7 @@ impl AudioCapturer {
             .await
             .map_err(|e| format!("Failed to create peer connection: {}", e))?;
         
-        // Create a new audio track with improved parameters
+        // Create a new audio track
         let audio_track = Arc::new(TrackLocalStaticSample::new(
             RTCRtpCodecCapability {
                 mime_type: MIME_TYPE_OPUS.to_string(),
@@ -127,27 +115,9 @@ impl AudioCapturer {
         ));
         
         // Add the audio track to the peer connection
-        let rtp_sender = peer_connection.add_track(Arc::clone(&audio_track) as Arc<dyn TrackLocal + Send + Sync>)
+        let _rtp_sender = peer_connection.add_track(Arc::clone(&audio_track) as Arc<dyn TrackLocal + Send + Sync>)
             .await
             .map_err(|e| format!("Failed to add audio track: {}", e))?;
-        
-        // Handle RTP packet sending with better error handling
-        tokio::spawn(async move {
-            loop {
-                match rtp_sender.read_rtcp().await {
-                    Ok(packets) => {
-                        // Fix: RTCP packets need to be iterated correctly
-                        for packet in packets.0 {  // Access the first element of the tuple
-                            debug!("Received RTCP packet: {:?}", packet.header());
-                        }
-                    },
-                    Err(e) => {
-                        error!("Error reading RTCP: {}", e);
-                        break;
-                    }
-                }
-            }
-        });
         
         self.peer_connection = Some(peer_connection);
         self.audio_track = Some(audio_track);
@@ -267,13 +237,10 @@ impl AudioCapturer {
                     // 3. Encode with Opus at the specified bitrate
                     
                     // Send the frame
-                    let sample = webrtc::media::Sample {
+                    let sample = Sample {
                         data: silence_frame.clone().into(),
                         duration: frame_duration,
-                        packet_timestamp,
-                        timestamp: SystemTime::now(),
-                        prev_dropped_packets: 0,
-                        prev_padding_packets: 0,
+                        ..Default::default()
                     };
                     
                     packet_timestamp = packet_timestamp.wrapping_add(samples_per_frame as u32);
