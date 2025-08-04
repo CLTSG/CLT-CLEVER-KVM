@@ -1,12 +1,12 @@
 use image::{ImageBuffer, RgbaImage};
-use scrap::{Capturer, Display};
-use std::io::ErrorKind::WouldBlock;
+use xcap::{Monitor, XCapError};
 use std::time::Duration;
 use std::thread;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use display_info::DisplayInfo;
-use log::{info, warn};
+use log::{info, warn, error, debug};
+use std::sync::Arc;
 
 // For delta encoding
 #[derive(Clone)]
@@ -29,7 +29,7 @@ pub struct MonitorInfo {
 }
 
 pub struct ScreenCapture {
-    capturer: Capturer,
+    monitor: Monitor,
     width: usize,
     height: usize,
     tile_size: usize,
@@ -51,83 +51,36 @@ impl ScreenCapture {
     pub fn height(&self) -> usize {
         self.height
     }
-    
-    // Enhanced method for monitor information
-    fn get_monitor_info(display_index: usize) -> Result<MonitorInfo, Box<dyn std::error::Error>> {
-        // Get system display info
-        let system_displays = DisplayInfo::all()?;
-        
-        if system_displays.is_empty() {
-            return Err("No display info available".into());
-        }
-        
-        // Map the display_index to the system display
-        let display_info = if display_index < system_displays.len() {
-            &system_displays[display_index]
-        } else {
-            // Default to the first display
-            &system_displays[0]
-        };
-        
-        // Fix: Don't use match on non-Option type
-        let scale_factor = display_info.scale_factor;
-        let rotation = display_info.rotation as i32;
-        
-        // Handle name field correctly
-        let display_name = format!("Display {}", display_info.id);
-        
-        Ok(MonitorInfo {
-            id: display_info.id.to_string(),
-            name: display_name,
-            is_primary: display_info.is_primary,
-            width: display_info.width as usize,
-            height: display_info.height as usize,
-            position_x: display_info.x,
-            position_y: display_info.y,
-            scale_factor: scale_factor as f64,
-            rotation,
-        })
-    }
 
     pub fn new(monitor_index: Option<usize>) -> Result<Self, Box<dyn std::error::Error>> {
-        // Get all displays
-        let displays = Display::all()?;
+        // Get all monitors
+        let monitors = Monitor::all().map_err(|e| format!("Failed to get monitors: {:?}", e))?;
         
-        if displays.is_empty() {
-            return Err("No displays found".into());
+        if monitors.is_empty() {
+            return Err("No monitors found".into());
         }
         
-        // Determine which display to capture
-        let display_index = match monitor_index {
+        // Determine which monitor to capture
+        let monitor_index = match monitor_index {
             Some(idx) => {
-                if idx < displays.len() {
+                if idx < monitors.len() {
                     idx
                 } else {
                     warn!("Requested monitor index {} out of bounds, falling back to primary", idx);
-                    0 // Default to primary display
+                    0 // Default to primary monitor
                 }
             },
-            None => 0, // Default to primary display
+            None => 0, // Default to primary monitor
         };
         
-        // Fix: The Capturer::new function requires ownership of Display
-        // We need to extract the display at the index and pass it directly
-        if display_index >= displays.len() {
-            return Err(format!("Display index {} out of bounds", display_index).into());
-        }
+        let monitor = monitors.into_iter().nth(monitor_index)
+            .ok_or_else(|| format!("Monitor index {} not found", monitor_index))?;
         
-        // Create a vector we can extract from (to avoid borrowing issues)
-        let mut displays_vec = displays;
-        // Remove the display we need from the vector to get ownership
-        let display = displays_vec.remove(display_index);
+        let width = monitor.width() as usize;
+        let height = monitor.height() as usize;
         
-        // Now we can create the capturer with the owned Display
-        let width = display.width();
-        let height = display.height();
-        let capturer = Capturer::new(display)?;
-        
-        // Get additional monitor info
-        let monitor_info = Self::get_monitor_info(display_index)?;
+        info!("Initialized screen capture for monitor {} ({}x{})", 
+              monitor.name(), width, height);
         
         // Define tile size (64x64 is a good balance)
         let tile_size = 64;
@@ -147,142 +100,60 @@ impl ScreenCapture {
             total_tiles
         ];
 
-        info!("Initialized screen capture for monitor {} ({}x{} at {},{}, primary: {})",
-              monitor_info.name, width, height, 
-              monitor_info.position_x, monitor_info.position_y,
-              monitor_info.is_primary);
-
         Ok(ScreenCapture {
-            capturer,
+            monitor,
             width,
             height,
             tile_size,
             tiles,
             previous_frame: None,
             adaptive_quality: Mutex::new(85), // Start with good quality
-            monitor_id: monitor_info.id,
-            is_primary: monitor_info.is_primary,
+            monitor_id: monitor_index.to_string(),
+            is_primary: monitor_index == 0,
         })
     }
 
     // Get a list of all available monitors
     pub fn get_all_monitors() -> Result<Vec<MonitorInfo>, Box<dyn std::error::Error>> {
-        let displays = Display::all()?;
-        let mut monitors = Vec::new();
+        let monitors = Monitor::all().map_err(|e| format!("Failed to get monitors: {:?}", e))?;
+        let mut monitor_infos = Vec::new();
         
-        for (idx, _) in displays.iter().enumerate() {
-            if let Ok(info) = Self::get_monitor_info(idx) {
-                monitors.push(info);
-            }
+        for (idx, monitor) in monitors.iter().enumerate() {
+            let monitor_info = MonitorInfo {
+                id: idx.to_string(),
+                name: monitor.name().to_string(),
+                is_primary: idx == 0, // Assume first monitor is primary
+                width: monitor.width() as usize,
+                height: monitor.height() as usize,
+                position_x: monitor.x(),
+                position_y: monitor.y(),
+                scale_factor: 1.0, // xcap doesn't provide scale factor directly
+                rotation: 0,       // xcap doesn't provide rotation directly
+            };
+            monitor_infos.push(monitor_info);
         }
         
-        Ok(monitors)
+        Ok(monitor_infos)
     }
 
     // Enhanced capture_raw method with scaling support for high DPI screens
     pub fn capture_raw(&mut self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        // Capture frame in raw format for codec encoding
-        let buffer = loop {
-            match self.capturer.frame() {
-                Ok(buffer) => break buffer,
-                Err(error) => {
-                    if error.kind() == WouldBlock {
-                        // Wait for the next frame
-                        thread::sleep(Duration::from_millis(5));
-                        continue;
-                    }
-                    return Err(Box::new(error));
-                }
-            }
-        };
-
-        // Convert to RGBA with optimized path for better performance
-        let mut rgba_buffer = Vec::with_capacity(self.width * self.height * 4);
-        let stride = buffer.len() / self.height;
-
-        // For large monitors, use parallel processing to speed up conversion
-        if self.width * self.height > 1_000_000 { // 1 million pixels threshold
-            // Using rayon or similar parallel processing would be ideal here
-            // This is a simple chunked approach for demonstration
-            let chunk_size = self.height / 4; // Split into 4 chunks
-            
-            let mut chunks: Vec<Vec<u8>> = vec![Vec::with_capacity(self.width * chunk_size * 4); 4];
-            
-            // Process chunks in sequence (parallel would be better)
-            for chunk_idx in 0..4 {
-                let start_y = chunk_idx * chunk_size;
-                let end_y = if chunk_idx == 3 { self.height } else { (chunk_idx + 1) * chunk_size };
-                
-                for y in start_y..end_y {
-                    for x in 0..self.width {
-                        let i = stride * y + 4 * x;
-                        chunks[chunk_idx].push(buffer[i + 2]); // R
-                        chunks[chunk_idx].push(buffer[i + 1]); // G
-                        chunks[chunk_idx].push(buffer[i]);     // B
-                        chunks[chunk_idx].push(255);           // A
-                    }
-                }
-            }
-            
-            // Combine chunks
-            for chunk in chunks {
-                rgba_buffer.extend_from_slice(&chunk);
-            }
-        } else {
-            // Original approach for smaller screens
-            for y in 0..self.height {
-                for x in 0..self.width {
-                    let i = stride * y + 4 * x;
-                    rgba_buffer.push(buffer[i + 2]); // R
-                    rgba_buffer.push(buffer[i + 1]); // G
-                    rgba_buffer.push(buffer[i]);     // B
-                    rgba_buffer.push(255);           // A
-                }
-            }
-        }
-
+        // Capture screen using xcap
+        let image = self.monitor.capture_image()
+            .map_err(|e| format!("Failed to capture screen: {:?}", e))?;
+        
+        // Convert to raw RGBA bytes
+        let rgba_buffer = image.into_raw();
+        
+        // Store previous frame for delta encoding
+        self.previous_frame = Some(rgba_buffer.clone());
+        
         Ok(rgba_buffer)
     }
 
     pub fn capture_rgba(&mut self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        // Capture frame
-        let buffer = loop {
-            match self.capturer.frame() {
-                Ok(buffer) => break buffer,
-                Err(error) => {
-                    if error.kind() == WouldBlock {
-                        // Wait for the next frame
-                        thread::sleep(Duration::from_millis(5));
-                        continue;
-                    }
-                    return Err(Box::new(error));
-                }
-            }
-        };
-
-        // Convert to RGBA
-        let mut rgba_buffer = Vec::with_capacity(self.width * self.height * 4);
-        let stride = buffer.len() / self.height;
-
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let i = stride * y + 4 * x;
-                if i + 3 < buffer.len() {
-                    rgba_buffer.push(buffer[i + 2]); // R
-                    rgba_buffer.push(buffer[i + 1]); // G
-                    rgba_buffer.push(buffer[i]);     // B
-                    rgba_buffer.push(255);           // A (fully opaque)
-                } else {
-                    // Handle edge case where stride calculation is off
-                    rgba_buffer.push(0); // R
-                    rgba_buffer.push(0); // G
-                    rgba_buffer.push(0); // B
-                    rgba_buffer.push(255); // A
-                }
-            }
-        }
-
-        Ok(rgba_buffer)
+        // For xcap, capture_raw already returns RGBA
+        self.capture_raw()
     }
 
     pub fn dimensions(&self) -> (usize, usize) {
