@@ -1,12 +1,7 @@
-use image::{ImageBuffer, RgbaImage};
-use xcap::{Monitor, XCapError};
-use std::time::Duration;
-use std::thread;
-use std::collections::HashMap;
+use xcap::Monitor;
+use std::hash::Hash;
+use log::{info, warn};
 use std::sync::Mutex;
-use display_info::DisplayInfo;
-use log::{info, warn, error, debug};
-use std::sync::Arc;
 
 // For delta encoding
 #[derive(Clone)]

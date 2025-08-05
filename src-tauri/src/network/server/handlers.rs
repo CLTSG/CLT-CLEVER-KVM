@@ -5,10 +5,10 @@ use axum::{
 };
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tokio::sync::broadcast;
 
-use super::websocket::{handle_socket_wrapper, handle_socket_wrapper_with_stop};
+use super::websocket::{handle_socket_wrapper, handle_socket_wrapper_with_stop, handle_socket_ultra};
 
 fn get_web_client_path() -> PathBuf {
     // Try multiple possible locations for the web-client directory
