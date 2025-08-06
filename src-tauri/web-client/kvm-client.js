@@ -14,7 +14,7 @@ class KVMClient {
         this.qualityLevel = 85;
         this.availableMonitors = [];
         this.currentMonitor = config.monitor;
-        this.currentCodec = "vp8"; // Always use VP8
+        this.currentCodec = "rgba"; // Use ultra-fast RGBA format
         this.mediaSource = null;
         this.sourceBuffer = null;
         this.videoQueue = [];
@@ -809,7 +809,7 @@ class KVMClient {
             wsHost = `${hostname}:9921`;
         }
         
-        const wsUrl = `${protocol}//${wsHost}/ws?monitor=${this.currentMonitor}&codec=vp8${this.config.audio ? '&audio=true' : ''}`;
+        const wsUrl = `${protocol}//${wsHost}/ws?monitor=${this.currentMonitor}&codec=rgba${this.config.audio ? '&audio=true' : ''}`;
         
         console.log('Connecting to WebSocket:', wsUrl);
         console.log('WebSocket host resolved to:', wsHost);
@@ -953,11 +953,11 @@ class KVMClient {
             this.osdTitle.textContent = `${data.hostname} - Monitor ${data.monitor} (${data.width}x${data.height})`;
         }
         
-        // Normalize codec name - server sends "webrtc" but we use "vp8" internally
-        this.currentCodec = "vp8"; // Always use VP8
-        console.log('Using VP8 codec');
+        // Normalize codec name - using ultra-fast RGBA format
+        this.currentCodec = "rgba"; // Use ultra-fast RGBA format
+        console.log('Using ultra-fast RGBA codec');
         if (this.codecDropdown) {
-            this.codecDropdown.value = 'vp8'; // Always set to VP8
+            this.codecDropdown.value = 'rgba'; // Set to RGBA
         }
         
         // Initialize canvas size
@@ -1176,44 +1176,72 @@ class KVMClient {
         const dataView = new DataView(arrayBuffer);
         let offset = 0;
         
-        // Fast header validation (optimized path)
-        if (dataView.byteLength < 23) return;
+        // Check for ultra-fast RGBA format from backend (starts with "RGBA")
+        if (dataView.byteLength < 24) return;
         
-        const header = dataView.getUint32(offset, false); // Read as big-endian uint32
-        offset += 3; // Only advance by 3 since we read 4
+        const rgbaSignature = dataView.getUint32(0, false) === 0x52474241; // "RGBA" in big-endian
         
-        // Fast header check: 0xAABB01 or 0xAABB02
-        if ((header >>> 8) !== 0xAABB01 && (header >>> 8) !== 0xAABB02) {
-            console.error('Invalid frame header');
-            return;
+        if (rgbaSignature) {
+            // New ultra-fast RGBA format from optimized backend - zero conversion overhead!
+            offset = 4; // Skip "RGBA" signature
+            
+            const width = dataView.getUint32(offset, true); offset += 4;
+            const height = dataView.getUint32(offset, true); offset += 4;
+            const frameNumber = dataView.getBigUint64(offset, true); offset += 8;
+            const dataLength = dataView.getUint32(offset, true); offset += 4;
+            
+            console.log(`� RGBA frame: ${width}x${height}, frame #${frameNumber}, data: ${dataLength} bytes, total: ${dataView.byteLength} bytes`);
+            
+            if (dataView.byteLength < offset + dataLength) {
+                console.error(`❌ RGBA frame truncated: need ${offset + dataLength} bytes, got ${dataView.byteLength} bytes`);
+                return;
+            }
+            
+            // Direct RGBA data - zero conversion needed!
+            const rgbaData = new Uint8Array(arrayBuffer, offset, dataLength);
+            
+            this.frameQueue.push({
+                rgbaData,
+                width,
+                height,
+                isKeyframe: true,
+                frameNumber,
+                timestamp: now,
+                format: 'rgba_direct' // Ultra-fast format
+            });
+        } else {
+            // Legacy RLE format fallback
+            const header = dataView.getUint32(offset, false);
+            offset += 3;
+            
+            if ((header >>> 8) !== 0xAABB01 && (header >>> 8) !== 0xAABB02) {
+                console.error('Invalid frame header');
+                return;
+            }
+            
+            const isKeyframe = (header & 0xFF) === 0x01;
+            const width = dataView.getUint32(offset, true); offset += 4;
+            const height = dataView.getUint32(offset, true); offset += 4;
+            const frameNumber = dataView.getBigUint64(offset, true); offset += 8;
+            const compressedLength = dataView.getUint32(offset, true); offset += 4;
+            
+            if (dataView.byteLength < offset + compressedLength) {
+                console.error('Frame truncated');
+                return;
+            }
+            
+            const compressedData = new Uint8Array(arrayBuffer, offset, compressedLength);
+            
+            this.frameQueue.push({
+                compressedData,
+                width,
+                height,
+                isKeyframe,
+                frameNumber,
+                timestamp: now,
+                format: 'rle' // Legacy format
+            });
         }
-        
-        const isKeyframe = (header & 0xFF) === 0x01;
-        
-        // Fast metadata extraction using DataView batch reads
-        const width = dataView.getUint32(offset, true); offset += 4;
-        const height = dataView.getUint32(offset, true); offset += 4;
-        const frameNumber = dataView.getBigUint64(offset, true); offset += 8;
-        const compressedLength = dataView.getUint32(offset, true); offset += 4;
-        
-        // Validate frame size early
-        if (dataView.byteLength < offset + compressedLength) {
-            console.error('Frame truncated');
-            return;
-        }
-        
-        // Extract compressed data as typed array view (zero-copy)
-        const compressedData = new Uint8Array(arrayBuffer, offset, compressedLength);
-        
-        // Queue frame for async processing
-        this.frameQueue.push({
-            compressedData,
-            width,
-            height,
-            isKeyframe,
-            frameNumber,
-            timestamp: now
-        });
         
         // Process frames asynchronously
         this.processFrameQueue();
@@ -1254,13 +1282,19 @@ class KVMClient {
     }
 
     async fastDecompressFrame(frame) {
-        const { compressedData, width, height, isKeyframe } = frame;
+        const { rgbaData, compressedData, width, height, isKeyframe, format } = frame;
         
-        if (isKeyframe || !this.previousFrameData) {
-            // Use optimized RLE decompression
+        if (format === 'rgba_direct') {
+            // Ultra-fast RGBA format - zero decompression needed!
+            return rgbaData;
+        } else if (format === 'vp8_yuv') {
+            // Legacy VP8 YUV format from optimized backend
+            return this.decompressVP8YUV(compressedData, width, height);
+        } else if (isKeyframe || !this.previousFrameData) {
+            // Legacy RLE decompression
             return this.fastDecompressRLE(compressedData, width * height * 4);
         } else {
-            // Fast delta application
+            // Fast delta application for legacy format
             return this.fastApplyDelta(compressedData, this.previousFrameData);
         }
     }
@@ -1310,6 +1344,113 @@ class KVMClient {
                     rgbaData[outputIndex++] = b;
                     rgbaData[outputIndex++] = a;
                 }
+            }
+        }
+        
+        return rgbaData;
+    }
+
+    decompressVP8YUV(compressedData, width, height) {
+        console.log(`🎥 Decompressing VP8 YUV: ${compressedData.length} bytes, ${width}x${height}`);
+        
+        // Check if data is compressed (old format) or uncompressed (new ultra-fast format)
+        const expectedYUVSize = width * height * 1.5; // Y + U/4 + V/4
+        
+        let yuvData;
+        if (compressedData.length >= expectedYUVSize * 0.8 && compressedData.length <= expectedYUVSize * 1.2) {
+            // Data appears to be uncompressed (new ultra-fast format)
+            console.log(`📊 Using uncompressed YUV data: ${compressedData.length} bytes`);
+            yuvData = compressedData;
+        } else {
+            // Data is compressed with RLE (legacy format)
+            console.log(`📊 Decompressing RLE YUV data: ${compressedData.length} bytes`);
+            yuvData = this.decompressSimpleRLE(compressedData);
+        }
+        
+        console.log(`📊 YUV data ready: ${yuvData.length} bytes (expected: ${expectedYUVSize})`);
+        
+        // Convert YUV420 back to RGBA for display
+        const rgbaData = this.yuv420ToRGBA(yuvData, width, height);
+        
+        console.log(`🎨 RGBA converted: ${rgbaData.length} bytes (expected: ${width * height * 4})`);
+        
+        return rgbaData;
+    }
+
+    decompressSimpleRLE(compressedData) {
+        const decompressed = new Uint8Array(compressedData.length * 2); // Estimate
+        let outputIndex = 0;
+        let inputIndex = 0;
+        
+        if (compressedData.length === 0) return decompressed;
+        
+        // First byte is always raw
+        decompressed[outputIndex++] = compressedData[inputIndex++];
+        
+        while (inputIndex < compressedData.length) {
+            const value = compressedData[inputIndex++];
+            
+            if (value === 0xFF && inputIndex + 1 < compressedData.length) {
+                // RLE marker: next byte is count, byte after is value
+                const count = compressedData[inputIndex++];
+                const repeatValue = compressedData[inputIndex++];
+                
+                for (let i = 0; i < count; i++) {
+                    decompressed[outputIndex++] = repeatValue;
+                }
+            } else {
+                // Regular byte
+                decompressed[outputIndex++] = value;
+            }
+        }
+        
+        return decompressed.slice(0, outputIndex);
+    }
+
+    yuv420ToRGBA(yuvData, width, height) {
+        const rgbaData = new Uint8Array(width * height * 4);
+        const ySize = width * height;
+        const uvSize = (width / 2) * (height / 2);
+        
+        // Planar YUV420 layout: Y plane, then U plane, then V plane
+        const yPlane = 0;
+        const uPlane = ySize;
+        const vPlane = ySize + uvSize;
+        
+        let rgbaIndex = 0;
+        
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                // Get Y value from Y plane
+                const yVal = yuvData[yPlane + y * width + x] || 16;
+                
+                // Get U,V values from separate planes (subsampled)
+                const uvX = Math.floor(x / 2);
+                const uvY = Math.floor(y / 2);
+                const uvIndex = uvY * (width / 2) + uvX;
+                
+                const uVal = yuvData[uPlane + uvIndex] || 128;
+                const vVal = yuvData[vPlane + uvIndex] || 128;
+                
+                // Convert YUV to RGB using fast integer math
+                const c = yVal - 16;
+                const d = uVal - 128;
+                const e = vVal - 128;
+                
+                let r = (298 * c + 409 * e + 128) >> 8;
+                let g = (298 * c - 100 * d - 208 * e + 128) >> 8;
+                let b = (298 * c + 516 * d + 128) >> 8;
+                
+                // Clamp to valid range
+                r = Math.max(0, Math.min(255, r));
+                g = Math.max(0, Math.min(255, g));
+                b = Math.max(0, Math.min(255, b));
+                
+                // Store RGBA
+                rgbaData[rgbaIndex++] = r;
+                rgbaData[rgbaIndex++] = g;
+                rgbaData[rgbaIndex++] = b;
+                rgbaData[rgbaIndex++] = 255; // Alpha
             }
         }
         
