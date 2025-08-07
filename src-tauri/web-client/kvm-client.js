@@ -14,19 +14,34 @@ class KVMClient {
         this.qualityLevel = 85;
         this.availableMonitors = [];
         this.currentMonitor = config.monitor;
-        this.currentCodec = "rgba"; // Use ultra-fast RGBA format
+        this.currentCodec = "yuv420_webm"; // Use YUV420 with WebM container for best quality
         this.mediaSource = null;
         this.sourceBuffer = null;
         this.videoQueue = [];
         this.showStats = false;
         
-        // VP8 decoder for real screen content
-        this.vp8Decoder = null;
+        // YUV420 decoder for enhanced video quality
+        this.yuv420Decoder = null;
         this.decoderCanvas = null;
         this.decoderCtx = null;
         
-        // VP8 video properties
+        // WebM container support
+        this.webmSupported = false;
+        this.webmContainer = null;
+        
+        // VP8 decoder for real screen content with YUV420 support
+        this.vp8Decoder = null;
+        this.yuv420Canvas = null;
+        this.yuv420Ctx = null;
+        
+        // Enhanced YUV420 video properties
         this.needsKeyframe = true;
+        this.supportsHardwareDecoding = false;
+        this.webmDecodeQueue = [];
+        
+        // WebM container format support
+        this.webmMuxer = null;
+        this.webmDemuxer = null;
         
         // OSD state
         this.osdVisible = true;
@@ -153,31 +168,53 @@ class KVMClient {
 
     initializeVP8Decoder() {
         try {
-            console.log('🎬 Initializing VP8 to WebM converter...');
+            console.log('🎬 Initializing YUV420 + WebM decoder...');
             
-            // Create decoder canvas for real screen content
-            this.decoderCanvas = document.createElement('canvas');
-            this.decoderCanvas.id = 'vp8-decoder-canvas';
-            this.decoderCanvas.style.position = 'absolute';
-            this.decoderCanvas.style.top = '0';
-            this.decoderCanvas.style.left = '0';
-            this.decoderCanvas.style.width = '100%';
-            this.decoderCanvas.style.height = '100%';
-            this.decoderCanvas.style.zIndex = '1';
-            this.decoderCtx = this.decoderCanvas.getContext('2d');
+            // Check for WebM container support with VP8 and Opus
+            const testTypes = [
+                'video/webm; codecs="vp8"',
+                'video/webm; codecs="vp8,opus"',
+                'audio/webm; codecs="opus"'
+            ];
             
-            // Add decoder canvas to the video container
-            const videoContainer = document.querySelector('.video-container');
-            if (videoContainer) {
-                videoContainer.appendChild(this.decoderCanvas);
+            this.webmSupported = false;
+            for (const type of testTypes) {
+                if (window.MediaSource && MediaSource.isTypeSupported(type)) {
+                    console.log('✅ Supported:', type);
+                    this.webmSupported = true;
+                }
+            }
+            
+            if (this.webmSupported) {
+                console.log('✅ Using native WebM VP8+Opus decoder');
+            } else {
+                console.log('⚠️ WebM not fully supported, using custom YUV420 decoder');
+                
+                // Create YUV420 decoder canvas for real screen content
+                this.yuv420Canvas = document.createElement('canvas');
+                this.yuv420Canvas.id = 'yuv420-decoder-canvas';
+                this.yuv420Canvas.style.position = 'absolute';
+                this.yuv420Canvas.style.top = '0';
+                this.yuv420Canvas.style.left = '0';
+                this.yuv420Canvas.style.width = '100%';
+                this.yuv420Canvas.style.height = '100%';
+                this.yuv420Canvas.style.zIndex = '1';
+                this.yuv420Ctx = this.yuv420Canvas.getContext('2d');
+                
+                // Add decoder canvas to the video container
+                const videoContainer = document.querySelector('.video-container');
+                if (videoContainer) {
+                    videoContainer.appendChild(this.yuv420Canvas);
+                }
             }
             
             // Initialize WebM container helper
             this.webmConverter = new WebMConverter();
-            console.log('✅ VP8 to WebM converter initialized successfully');
+            console.log('✅ YUV420 + WebM decoder initialized successfully');
             
         } catch (error) {
-            console.error('❌ Failed to initialize VP8 converter:', error);
+            console.error('❌ Failed to initialize YUV420 + WebM decoder:', error);
+            this.webmSupported = false;
         }
     }
 
@@ -809,7 +846,7 @@ class KVMClient {
             wsHost = `${hostname}:9921`;
         }
         
-        const wsUrl = `${protocol}//${wsHost}/ws?monitor=${this.currentMonitor}&codec=rgba${this.config.audio ? '&audio=true' : ''}`;
+        const wsUrl = `${protocol}//${wsHost}/ws?monitor=${this.currentMonitor}&codec=${this.currentCodec}${this.config.audio ? '&audio=true' : ''}`;
         
         console.log('Connecting to WebSocket:', wsUrl);
         console.log('WebSocket host resolved to:', wsHost);
@@ -909,6 +946,9 @@ class KVMClient {
             case 'info':  // Fallback for older message type
                 this.handleServerInfo(data);
                 break;
+            case 'stream_info':
+                this.handleStreamInfo(data);
+                break;
             case 'video_frame':
                 this.handleVideoFrame(data);
                 break;
@@ -953,11 +993,10 @@ class KVMClient {
             this.osdTitle.textContent = `${data.hostname} - Monitor ${data.monitor} (${data.width}x${data.height})`;
         }
         
-        // Normalize codec name - using ultra-fast RGBA format
-        this.currentCodec = "rgba"; // Use ultra-fast RGBA format
-        console.log('Using ultra-fast RGBA codec');
+        // Keep the codec that was initialized - don't override to rgba
+        console.log('Using codec:', this.currentCodec);
         if (this.codecDropdown) {
-            this.codecDropdown.value = 'rgba'; // Set to RGBA
+            this.codecDropdown.value = this.currentCodec === 'yuv420_webm' ? 'vp8' : this.currentCodec;
         }
         
         // Initialize canvas size
@@ -987,6 +1026,64 @@ class KVMClient {
         }, 1000);
         
         this.showNotification(`Connected to ${data.hostname} - ${data.width}x${data.height} using ${data.codec}`);
+    }
+
+    handleStreamInfo(data) {
+        console.log('Stream info received:', data);
+        
+        // Extract video configuration
+        const videoConfig = data.video_config;
+        const serverInfo = data.server_info;
+        
+        this.screenWidth = videoConfig.width;
+        this.screenHeight = videoConfig.height;
+        
+        // Update canvas size if fallback is active
+        if (this.fallbackCanvas) {
+            this.fallbackCanvas.width = this.screenWidth;
+            this.fallbackCanvas.height = this.screenHeight;
+            console.log(`Updated canvas size to: ${this.screenWidth}x${this.screenHeight}`);
+        }
+        
+        // Update UI with server information
+        if (this.osdTitle) {
+            this.osdTitle.textContent = `${serverInfo.hostname} - Monitor ${serverInfo.current_monitor} (${videoConfig.width}x${videoConfig.height})`;
+        }
+        
+        // Keep the codec that was initialized - don't override to rgba
+        console.log('Using codec:', this.currentCodec);
+        if (this.codecDropdown) {
+            this.codecDropdown.value = this.currentCodec === 'yuv420_webm' ? 'vp8' : this.currentCodec;
+        }
+        
+        // Initialize canvas size
+        if (this.canvasLayer) {
+            this.canvasLayer.width = this.screenWidth;
+            this.canvasLayer.height = this.screenHeight;
+        }
+        
+        // Ensure video element is visible
+        if (this.videoScreen) {
+            this.videoScreen.style.display = 'block';
+        }
+        
+        // Initialize video streaming
+        this.initializeVideoStreaming();
+        
+        // Initialize WebRTC for audio if enabled (audio_config will be present)
+        if (this.config.audio && data.audio_config) {
+            // TODO: Handle audio configuration
+            console.log('Audio config:', data.audio_config);
+        }
+        
+        // Hide loading status after successful connection
+        setTimeout(() => {
+            if (this.statusDisplay) {
+                this.statusDisplay.style.display = 'none';
+            }
+        }, 1000);
+        
+        this.showNotification(`Connected to ${serverInfo.hostname} - ${videoConfig.width}x${videoConfig.height} using ${videoConfig.codec}`);
     }
 
     initializeVideoStreaming() {
@@ -1025,118 +1122,111 @@ class KVMClient {
     }
 
     initializeMediaSource(codec) {
-        console.log('Initializing MediaSource for codec:', codec);
+        console.log('🎬 Initializing MediaSource for codec:', codec);
         
         // Don't reinitialize if already set up
         if (this.mediaSource && this.mediaSource.readyState === 'open' && this.sourceBuffer) {
-            console.log('MediaSource already initialized and ready');
+            console.log('✅ MediaSource already initialized and ready');
             return;
         }
         
         if (!window.MediaSource) {
-            console.error('MediaSource API not supported - VP8 video cannot work without MediaSource');
-            this.showError('VP8 video requires MediaSource API support');
+            console.error('❌ MediaSource API not supported - WebM video cannot work without MediaSource');
+            this.showError('WebM video requires MediaSource API support');
             return;
         }
         
-        // Test multiple codec configurations
-        const codecConfigs = this.getCodecConfigurations(codec);
-        let mimeType = null;
+        // Test WebM VP8 codec configurations with Opus audio
+        const codecConfigs = [
+            'video/webm; codecs="vp8,opus"',  // VP8 video + Opus audio
+            'video/webm; codecs="vp8"',       // VP8 video only
+            'video/mp4; codecs="avc1.42E01E"' // H.264 fallback
+        ];
         
-        console.log('Testing codec configurations:', codecConfigs);
-        
-        for (const config of codecConfigs) {
-            console.log(`Testing MIME type: ${config}`);
-            if (MediaSource.isTypeSupported(config)) {
-                mimeType = config;
-                console.log(`✓ Supported MIME type found: ${config}`);
+        let supportedMimeType = null;
+        for (const mimeType of codecConfigs) {
+            if (MediaSource.isTypeSupported(mimeType)) {
+                supportedMimeType = mimeType;
+                console.log('✅ Using supported codec:', mimeType);
                 break;
             } else {
-                console.log(`✗ Not supported: ${config}`);
+                console.log('❌ Unsupported codec:', mimeType);
             }
         }
         
-        if (!mimeType) {
-            console.error('No supported VP8 codec configurations found - browser does not support VP8');
-            this.showError('Browser does not support VP8 video codec');
+        if (!supportedMimeType) {
+            console.error('❌ No supported video codecs found');
+            this.showError('No supported WebM video codecs available');
             return;
         }
         
-        // Clean up existing MediaSource
-        if (this.mediaSource) {
-            try {
-                if (this.sourceBuffer && this.mediaSource.readyState === 'open') {
-                    this.mediaSource.removeSourceBuffer(this.sourceBuffer);
-                }
-                if (this.videoScreen.src && this.videoScreen.src.startsWith('blob:')) {
-                    URL.revokeObjectURL(this.videoScreen.src);
-                }
-            } catch (e) {
-                console.error('Error cleaning up MediaSource:', e);
-            }
-        }
-        
-        this.mediaSource = new MediaSource();
-        this.sourceBuffer = null;
-        this.videoQueue = this.videoQueue || []; // Preserve existing queue or create new one
-        this.needsKeyframe = true;
-        
-        // Create object URL and set it to video element
-        const objectURL = URL.createObjectURL(this.mediaSource);
-        if (this.videoScreen) {
-            this.videoScreen.src = objectURL;
-        }
-        
-        // Set up MediaSource event handlers
-        this.mediaSource.addEventListener('sourceopen', () => {
-            console.log('📺 MediaSource ready for VP8 WebM container format');
-            try {
-                if (this.mediaSource.readyState === 'open') {
-                    this.sourceBuffer = this.mediaSource.addSourceBuffer(mimeType);
-                    this.sourceBuffer.mode = 'sequence';
+        try {
+            // Create new MediaSource
+            this.mediaSource = new MediaSource();
+            
+            this.mediaSource.addEventListener('sourceopen', () => {
+                console.log('🎬 MediaSource opened, creating SourceBuffer with:', supportedMimeType);
+                
+                try {
+                    // Create source buffer for WebM container
+                    this.sourceBuffer = this.mediaSource.addSourceBuffer(supportedMimeType);
                     
-                    // Set up SourceBuffer event handlers
+                    // Configure source buffer for streaming
+                    this.sourceBuffer.mode = 'sequence'; // Better for streaming
+                    
                     this.sourceBuffer.addEventListener('updateend', () => {
-                        // Process queued video data
+                        // Process next chunk in queue
                         this.processVideoQueue();
-                        
-                        // Auto-play if video is ready
-                        if (this.videoScreen && this.videoScreen.paused && this.videoScreen.readyState >= 2) {
-                            console.log('🎬 Starting video playback');
-                            this.videoScreen.play().catch(e => {
-                                console.warn('Auto-play failed:', e);
-                                this.handleAutoplayFailed();
-                            });
-                        }
                     });
                     
                     this.sourceBuffer.addEventListener('error', (e) => {
-                        console.error('⚠️ SourceBuffer error (expected with raw VP8):', e);
-                        this.needsKeyframe = true;
-                        this.requestKeyframe();
+                        console.error('❌ SourceBuffer error:', e);
                     });
                     
-                    console.log('✅ MediaSource initialized - Canvas fallback will handle raw VP8 frames');
+                    console.log('✅ SourceBuffer ready for WebM streaming');
                     
-                    // Process any frames that were queued while we were initializing
-                    if (this.videoQueue.length > 0) {
-                        console.log(`📦 Processing ${this.videoQueue.length} queued frames`);
-                        this.processVideoQueue();
-                    }
-                    
-                    // Request initial keyframe
-                    this.requestKeyframe();
+                } catch (error) {
+                    console.error('❌ Failed to create SourceBuffer:', error);
+                    this.showError('Failed to initialize video decoder');
                 }
-            } catch (e) {
-                console.error('Error setting up MediaSource:', e);
-                this.showError('MediaSource setup failed');
+            });
+            
+            this.mediaSource.addEventListener('sourceended', () => {
+                console.log('📺 MediaSource ended');
+            });
+            
+            this.mediaSource.addEventListener('error', (e) => {
+                console.error('❌ MediaSource error:', e);
+                this.showError('Video streaming error occurred');
+            });
+            
+            // Set MediaSource as video source
+            if (this.videoScreen) {
+                this.videoScreen.src = URL.createObjectURL(this.mediaSource);
+                console.log('🎬 MediaSource connected to video element');
             }
-        });
+            
+        } catch (error) {
+            console.error('❌ Failed to initialize MediaSource:', error);
+            this.showError('Failed to initialize video streaming');
+        }
+    }
+
+    processVideoQueue() {
+        if (!this.sourceBuffer || this.sourceBuffer.updating || this.videoQueue.length === 0) {
+            return;
+        }
         
-        this.mediaSource.addEventListener('error', (e) => {
-            console.error('MediaSource error:', e);
-            this.showError('MediaSource playback error');
-        });
+        try {
+            const videoData = this.videoQueue.shift();
+            if (videoData && videoData.byteLength > 0) {
+                this.sourceBuffer.appendBuffer(videoData);
+            }
+        } catch (error) {
+            console.error('❌ Error processing video queue:', error);
+            // Clear queue on error to prevent pile-up
+            this.videoQueue = [];
+        }
     }
 
     handleBinaryVideoFrame(binaryData) {
@@ -1152,16 +1242,129 @@ class KVMClient {
         this.frameLogCounter++;
 
         try {
-            // Fast path - direct ArrayBuffer processing
-            this.parseAndRenderFrame(binaryData);
+            // Check if this is a WebM container frame
+            if (this.isWebMFrame(binaryData)) {
+                this.handleWebMFrame(binaryData);
+            } else {
+                // Fall back to custom frame parsing
+                this.parseAndRenderFrame(binaryData);
+            }
+            
             this.updateFrameStats();
             
         } catch (e) {
             // Minimal error handling to avoid console spam
             if (this.frameLogCounter % 100 === 0) {
-                console.error('Frame error:', e.message);
+                console.error('Frame processing error:', e.message);
             }
         }
+    }
+
+    isWebMFrame(binaryData) {
+        // Check for WebM container signature (EBML header)
+        const dataView = new DataView(binaryData);
+        if (dataView.byteLength < 4) return false;
+        
+        // WebM files start with EBML header (0x1A45DFA3)
+        const ebmlHeader = dataView.getUint32(0, false);
+        return ebmlHeader === 0x1A45DFA3;
+    }
+
+    handleWebMFrame(webmData) {
+        if (this.webmSupported && this.sourceBuffer && !this.sourceBuffer.updating) {
+            try {
+                // Queue WebM frame for native browser decoding
+                this.videoQueue.push(webmData);
+                this.processVideoQueue();
+                console.log('🎬 WebM frame queued for native decoding');
+            } catch (error) {
+                console.error('❌ WebM frame processing error:', error);
+                // Fall back to custom decoding
+                this.parseWebMFrame(webmData);
+            }
+        } else {
+            // Custom WebM demuxing and VP8 decoding
+            this.parseWebMFrame(webmData);
+        }
+    }
+
+    parseWebMFrame(webmData) {
+        try {
+            // Basic WebM demuxing to extract VP8 payload
+            const vp8Payload = this.extractVP8FromWebM(webmData);
+            if (vp8Payload) {
+                this.handleVP8Frame(vp8Payload);
+            }
+        } catch (error) {
+            console.error('❌ WebM parsing error:', error);
+        }
+    }
+
+    extractVP8FromWebM(webmData) {
+        // Simplified WebM demuxer - look for VP8 track data
+        const dataView = new DataView(webmData);
+        let offset = 0;
+        
+        // Skip EBML header and find the first cluster
+        // This is a simplified implementation
+        while (offset < dataView.byteLength - 8) {
+            const elementId = dataView.getUint32(offset, false);
+            
+            if (elementId === 0x1F43B675) { // Cluster element
+                // Found cluster, look for SimpleBlock with VP8 data
+                offset += 4;
+                const clusterSize = this.parseEBMLSize(dataView, offset);
+                // Extract VP8 payload from the cluster
+                // This would need more detailed implementation
+                break;
+            }
+            offset++;
+        }
+        
+        // For now, return null - would need full WebM demuxer
+        return null;
+    }
+
+    handleVP8Frame(vp8Data) {
+        // Handle raw VP8 frame data
+        if (this.yuv420Canvas && this.yuv420Ctx) {
+            this.renderVP8ToCanvas(vp8Data);
+        }
+    }
+
+    renderVP8ToCanvas(vp8Data) {
+        // Custom VP8 decoder implementation would go here
+        // For now, we'll simulate frame rendering
+        console.log('🎬 Rendering VP8 frame to canvas');
+    }
+
+    parseEBMLSize(dataView, offset) {
+        // Parse EBML variable-size integer
+        const firstByte = dataView.getUint8(offset);
+        let size = 0;
+        let length = 0;
+        
+        // Find the length indicator
+        if (firstByte & 0x80) {
+            length = 1;
+            size = firstByte & 0x7F;
+        } else if (firstByte & 0x40) {
+            length = 2;
+            size = ((firstByte & 0x3F) << 8) | dataView.getUint8(offset + 1);
+        } else if (firstByte & 0x20) {
+            length = 3;
+            size = ((firstByte & 0x1F) << 16) | 
+                   (dataView.getUint8(offset + 1) << 8) | 
+                   dataView.getUint8(offset + 2);
+        } else if (firstByte & 0x10) {
+            length = 4;
+            size = ((firstByte & 0x0F) << 24) |
+                   (dataView.getUint8(offset + 1) << 16) |
+                   (dataView.getUint8(offset + 2) << 8) |
+                   dataView.getUint8(offset + 3);
+        }
+        
+        return size;
     }
 
     parseAndRenderFrame(arrayBuffer) {

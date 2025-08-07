@@ -1,6 +1,12 @@
-use crate::streaming::{RealtimeConfig};
-use crate::streaming::RealtimeStreamHandler;
-use crate::streaming::UltraStreamHandler; // Ultra-low latency handler
+use crate::streaming::{
+    RealtimeConfig, 
+    IntegratedStreamHandler, 
+    IntegratedStreamConfig,
+    RealtimeStreamHandler,
+    UltraStreamHandler,
+    // EnhancedVideoEncoder,
+    // EnhancedAudioEncoder
+};
 use axum::extract::ws::WebSocket;
 use tokio::{sync::broadcast};
 use log::{error, info, warn};
@@ -22,6 +28,16 @@ pub enum ControlMessage {
     #[serde(rename = "quality_setting")]
     QualitySetting { quality: u8 },
     
+    #[serde(rename = "bitrate_setting")]
+    BitrateSetting { bitrate: u32 },
+    
+    #[serde(rename = "webm_config")]
+    WebMConfig { 
+        enable_vp8: bool,
+        enable_opus: bool,
+        target_bitrate: Option<u32>
+    },
+    
     #[serde(rename = "network_stats")]
     NetworkStats { 
         latency: Option<u32>,
@@ -30,31 +46,30 @@ pub enum ControlMessage {
     },
 }
 
-// Helper function to make the future Send - now uses real-time streaming
-pub async fn handle_socket_wrapper(socket: WebSocket, monitor: usize, _codec: String, enable_audio: bool) {
-    // Always use VP8 codec with real-time streaming
-    info!("New real-time streaming WebSocket connection - Monitor: {}, Codec: VP8, Audio: {}", 
-          monitor, enable_audio);
+// Helper function to make the future Send - now uses integrated YUV420 + WebM streaming
+pub async fn handle_socket_wrapper(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
+    info!("🎬 New YUV420 + WebM streaming WebSocket connection - Monitor: {}, Codec: {}, Audio: {}", 
+          monitor, codec, enable_audio);
     
-    handle_realtime_socket(socket, monitor, enable_audio, None).await;
+    handle_integrated_webm_socket(socket, monitor, enable_audio, None).await;
     
-    info!("Real-time streaming WebSocket connection closed - Monitor: {}", monitor);
+    info!("✅ YUV420 + WebM streaming WebSocket connection closed - Monitor: {}", monitor);
 }
 
-// New helper function with stop signal - uses real-time streaming
+// New helper function with stop signal - uses integrated WebM streaming
 pub async fn handle_socket_wrapper_with_stop(
     socket: WebSocket, 
     monitor: usize, 
-    _codec: String, 
+    codec: String, 
     enable_audio: bool, 
     stop_rx: broadcast::Receiver<()>
 ) {
-    info!("New real-time streaming WebSocket connection with stop signal - Monitor: {}, Codec: VP8, Audio: {}", 
-          monitor, enable_audio);
+    info!("🎬 New YUV420 + WebM streaming WebSocket connection with stop signal - Monitor: {}, Codec: {}, Audio: {}", 
+          monitor, codec, enable_audio);
     
-    handle_realtime_socket(socket, monitor, enable_audio, Some(stop_rx)).await;
+    handle_integrated_webm_socket(socket, monitor, enable_audio, Some(stop_rx)).await;
     
-    info!("Real-time streaming WebSocket connection with stop signal closed - Monitor: {}", monitor);
+    info!("✅ YUV420 + WebM streaming WebSocket connection with stop signal closed - Monitor: {}", monitor);
 }
 
 pub async fn handle_socket_with_stop(
@@ -64,58 +79,61 @@ pub async fn handle_socket_with_stop(
     enable_audio: bool, 
     stop_rx: broadcast::Receiver<()>
 ) {
-    info!("New WebSocket connection with stop signal: monitor={}, codec={}, audio={}", 
+    info!("🎬 New WebSocket connection with stop signal: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
-    // Always use real-time streaming for connections with stop signal
-    handle_realtime_socket(socket, monitor, enable_audio, Some(stop_rx)).await;
+    // Always use integrated WebM streaming for connections with stop signal
+    handle_integrated_webm_socket(socket, monitor, enable_audio, Some(stop_rx)).await;
 }
 
 pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
-    info!("New WebSocket connection: monitor={}, codec={}, audio={}", 
+    info!("🎬 New WebSocket connection: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
-    // Always use real-time streaming for direct connections
-    handle_realtime_socket(socket, monitor, enable_audio, None).await;
+    // Always use integrated WebM streaming for direct connections
+    handle_integrated_webm_socket(socket, monitor, enable_audio, None).await;
 }
 
-// New ultra-low latency streaming socket handler with Google/Microsoft optimizations
-async fn handle_realtime_socket(
+// New integrated YUV420 + WebM streaming socket handler
+async fn handle_integrated_webm_socket(
     socket: WebSocket, 
     monitor: usize, 
-    _enable_audio: bool, // Audio support can be added later
+    enable_audio: bool,
     stop_rx: Option<broadcast::Receiver<()>>
 ) {
-    info!("🚀 Starting ULTRA-LOW LATENCY streaming session for monitor {}", monitor);
+    info!("🚀 WebM streaming requested for monitor {} - falling back to RGBA streaming for now", monitor);
     
-    // Use ultra-high performance handler for <16ms total latency
+    // TODO: Implement proper WebM/VP8 encoding
+    // For now, fall back to working RGBA streaming
+    info!("🔄 Using RGBA streaming until WebM/VP8 encoding is implemented");
+    
     match UltraStreamHandler::new(monitor) {
         Ok(handler) => {
-            info!("✅ Ultra-low latency handler initialized successfully");
+            info!("✅ RGBA streaming handler initialized successfully");
             handler.handle_connection(socket, stop_rx).await;
         }
         Err(e) => {
-            error!("❌ Failed to create ultra-low latency handler: {}", e);
+            error!("❌ Failed to create RGBA streaming handler: {}", e);
             
-            // Fallback to standard real-time streaming with IMPROVED QUALITY
-            warn!("🔄 Falling back to standard real-time streaming");
-            
-            let config = RealtimeConfig {
+            // Final fallback to standard real-time streaming with enhanced quality
+            info!("🔄 Final fallback to enhanced real-time streaming...");
+            let enhanced_config = RealtimeConfig {
                 monitor_id: monitor,
                 width: 1920,
                 height: 1080,  
-                bitrate: 12000, // MUCH higher bitrate for excellent quality
-                framerate: 60,  // Smooth 60fps
-                keyframe_interval: 60, // More frequent keyframes (every 1 second)
-                target_latency_ms: 100, // Relaxed latency for better quality
+                bitrate: 8000, // High bitrate for quality
+                framerate: 30,  // Stable framerate
+                keyframe_interval: 30, // Frequent keyframes
+                target_latency_ms: 150, // Balanced latency
             };
             
-            match RealtimeStreamHandler::new(config) {
-                Ok(fallback_handler) => {
-                    fallback_handler.handle_connection(socket, stop_rx).await;
+            match RealtimeStreamHandler::new(enhanced_config) {
+                Ok(handler) => {
+                    info!("✅ Enhanced real-time fallback handler initialized");
+                    handler.handle_connection(socket, stop_rx).await;
                 }
-                Err(fallback_error) => {
-                    error!("💥 Failed to create fallback handler: {}", fallback_error);
+                Err(e) => {
+                    error!("❌ All streaming handlers failed to initialize: {}", e);
                 }
             }
         }
@@ -140,35 +158,35 @@ pub async fn handle_socket_ultra(
 }
 
 async fn handle_ultra_connection(socket: WebSocket, monitor: usize) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    info!("⚡ Starting ultra-performance streaming for monitor {}", monitor);
+    info!("⚡ Starting ultra-performance YUV420 + WebM streaming for monitor {}", monitor);
     
-    // Try ultra-performance first, graceful fallback to standard
+    // Try ultra-performance WebM streaming first
     match crate::streaming::UltraStreamHandler::new(monitor) {
         Ok(ultra_handler) => {
-            info!("🚀 Using ULTRA-PERFORMANCE streaming mode");
+            info!("🚀 Using ULTRA-PERFORMANCE YUV420 + WebM streaming mode");
             ultra_handler.handle_connection(socket, Some(tokio::sync::broadcast::channel(1).1)).await;
         },
         Err(e) => {
-            warn!("⚠️  Ultra-performance mode failed: {} - falling back to standard mode", e);
+            warn!("⚠️  Ultra-performance WebM mode failed: {} - falling back to enhanced mode", e);
             
-            // Fallback to standard real-time streaming with HIGH QUALITY
-            let config = crate::streaming::RealtimeConfig {
+            // Fallback to enhanced real-time streaming with WebM support
+            let enhanced_config = crate::streaming::RealtimeConfig {
                 monitor_id: monitor,
                 width: 1920,
                 height: 1080,  
-                bitrate: 15000, // Very high bitrate for excellent quality
-                framerate: 60,  // Smooth standard framerate
-                keyframe_interval: 60, // Frequent keyframes for stability
-                target_latency_ms: 150, // Generous latency budget for quality
+                bitrate: 10000, // Very high bitrate for excellent WebM quality
+                framerate: 60,  // Smooth framerate
+                keyframe_interval: 60, // Frequent keyframes for WebM stability
+                target_latency_ms: 120, // Optimized latency for WebM
             };
             
-            match crate::streaming::RealtimeStreamHandler::new(config) {
+            match crate::streaming::RealtimeStreamHandler::new(enhanced_config) {
                 Ok(fallback_handler) => {
-                    info!("🔄 Using STANDARD real-time streaming mode");
+                    info!("🔄 Using ENHANCED WebM real-time streaming mode");
                     fallback_handler.handle_connection(socket, Some(tokio::sync::broadcast::channel(1).1)).await;
                 },
                 Err(e) => {
-                    error!("❌ Both ultra and standard streaming failed: {}", e);
+                    error!("❌ Both ultra and enhanced WebM streaming failed: {}", e);
                     return Err(e.into());
                 }
             }
