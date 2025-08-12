@@ -1,15 +1,17 @@
 <script setup>
 import { onMounted, computed } from "vue";
-import { useServer } from "./composables/useServer";
-import { presets } from "./constants/presets";
+import { useServer } from "./composables";
+import { presets } from "./constants";
 
-import TabContainer from "./components/TabContainer.vue";
-import ServerStatus from "./components/ServerStatus.vue";
-import ServerConfiguration from "./components/ServerConfiguration.vue";
-import ConnectionOptions from "./components/ConnectionOptions.vue";
-import LogViewer from "./components/LogViewer.vue";
-import UpdaterDialog from "./components/UpdaterDialog.vue";
-import UpdateChecker from "./components/UpdateChecker.vue";
+import {
+  TabContainer,
+  ServerStatus,
+  ServerConfiguration,
+  ConnectionOptions,
+  LogViewer,
+  UpdaterDialog,
+  UpdateChecker
+} from "./components";
 
 const {
   serverStatus,

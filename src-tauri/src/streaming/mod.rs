@@ -1,17 +1,13 @@
-pub mod realtime_codec;
-pub mod realtime_stream;
-pub mod ultra_low_latency;
-pub mod ultra_stream;
-pub mod yuv420_encoder;
-pub mod enhanced_audio;
-// pub mod enhanced_video; // Temporarily disabled due to dependency issues
-pub mod integrated_handler;
+//! Streaming module - Video and audio streaming functionality
+//! 
+//! This module provides comprehensive streaming capabilities including
+//! real-time codecs, enhanced performance implementations, and stream handlers.
 
-pub use realtime_codec::*;
-pub use realtime_stream::*;
-pub use ultra_low_latency::*;
-pub use ultra_stream::*;
-pub use yuv420_encoder::*;
-pub use enhanced_audio::*;
-// pub use enhanced_video::*; // Temporarily disabled
-pub use integrated_handler::*;
+pub mod codecs;
+pub mod enhanced;
+pub mod handlers;
+
+// Re-export all public items for backward compatibility
+pub use codecs::*;
+pub use enhanced::*;
+pub use handlers::*;
