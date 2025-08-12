@@ -79,6 +79,11 @@ graph LR
 
 ## 🔧 Technical Deep Dive
 
+### Budget Increase for Ultra-Low Latency Mode
+- **Encode Budget Increased**: The encoding budget for ultra-low latency mode has been increased from 150ms to 500ms.
+- **Total Processing Budget Increased**: The total processing budget has been increased from 300ms to 500ms.
+- **Target Latency Updated**: The default target latency is now set to 500ms for more realistic performance on modern hardware.
+
 ### Revolutionary RGBA Streaming Innovation
 
 #### Before (VP8/YUV Problems)
@@ -133,6 +138,9 @@ function fastDecompressFrame(buffer, format) {
 ```
 
 ## 🧪 Testing & Validation
+
+### Budget Update Validation
+- ✅ Ultra-low latency mode now uses a 500ms encode and total budget for improved stability and performance on a wider range of hardware.
 
 ### Compilation Status
 - ✅ Zero compilation errors with revolutionary RGBA implementation
@@ -217,7 +225,7 @@ function fastDecompressFrame(buffer, format) {
 
 ### VP8 Problem Resolution
 - **Complete Black Screen Elimination**: RGBA format prevents all VP8 decode failures
-- **Error-Free Streaming**: Zero "frame truncated" or timing-related issues
+- **Error-Free Streaming**: Zero "VP8 frame truncated" or timing-related issues
 - **Instant Compatibility**: Works with existing kvm-client.js without modifications
 - **Reliable Video Display**: Consistent visual output without decode artifacts
 

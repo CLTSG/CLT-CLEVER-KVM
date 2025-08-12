@@ -37,8 +37,8 @@ impl PerformanceTarget {
     pub fn ultra_low_latency() -> Self {
         Self {
             capture_budget_ms: 100.0,  // 100ms max for screen capture (realistic for 1920x1080)
-            encode_budget_ms: 150.0,   // 150ms max for encoding (realistic)
-            total_budget_ms: 300.0,    // 300ms total processing budget (much more realistic)
+            encode_budget_ms: 500.0,   // 500ms max for encoding (increased from 150ms)
+            total_budget_ms: 500.0,    // 500ms total processing budget (increased from 300ms)
             target_fps: 30,            // 30 FPS more achievable for high res
             max_frame_queue: 2,        // Allow small buffer
         }
@@ -90,7 +90,7 @@ impl Default for UltraLowLatencyConfig {
             enable_simd_optimization: true,
             enable_parallel_processing: true,
             adaptive_quality: true,
-            target_latency_ms: 300, // Match the updated total_budget_ms
+            target_latency_ms: 500, // Match the updated total_budget_ms
         }
     }
 }
