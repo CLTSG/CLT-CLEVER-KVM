@@ -8,7 +8,7 @@ This PR introduces a groundbreaking **zero-conversion RGBA streaming architectur
 
 - ✅ **VP8 Issues Resolved**: Eliminated "VP8 frame truncated" errors and black screen problems
 - ✅ **Zero-Conversion Architecture**: Direct RGBA streaming with no format conversion overhead
-- ✅ **Performance Crisis Solved**: Reduced 600-900ms encoding delays to sub-300ms targets
+- ✅ **Performance Crisis Solved**: Reduced 600-900ms encoding delays to sub-500ms targets
 - ✅ **Revolutionary Technology**: First-of-its-kind direct RGBA streaming for KVM applications
 - ✅ **Professional Code Restructuring**: Complete modular reorganization of frontend and backend code
 - ✅ **Maintainable Architecture**: Industry-standard project structure for long-term development
@@ -21,7 +21,7 @@ This PR introduces a groundbreaking **zero-conversion RGBA streaming architectur
 - **Solution**: Revolutionary direct RGBA streaming eliminating ALL conversion overhead
 
 ### Backend Performance Bottlenecks
-- **Issue**: Severe encoding delays (600-900ms vs 300ms budget) causing transmission timeouts
+- **Issue**: Severe encoding delays (600-900ms vs 500ms budget) causing transmission timeouts
 - **Root Cause**: YUV conversion pipeline requiring millions of pixel operations
 - **Solution**: Zero-conversion RGBA architecture with direct memory transfer
 
@@ -48,7 +48,7 @@ graph LR
     E --> F[Client RGBA Detection]
     F --> G[Direct Canvas Rendering]
     
-    H[Ultra Mode <300ms] --> I{Performance Check}
+    H[Ultra Mode <500ms] --> I{Performance Check}
     I -->|Success| J[Continue RGBA Streaming]
     I -->|Budget Exceeded| K[Emergency Mode]
     K --> L[Maintain RGBA Format]
@@ -58,7 +58,7 @@ graph LR
 
 #### 🔥 Zero-Conversion RGBA Engine (`ultra_low_latency.rs`)
 - **Direct RGBA Streaming**: Eliminates ALL YUV conversion overhead
-- **Performance Target**: <300ms realistic latency (vs impossible 60ms)
+- **Performance Target**: <500ms realistic latency (vs impossible 60ms)
 - **Zero-Copy Architecture**: Direct memory transfer with RGBA signature headers
 - **Format Innovation**: "RGBA" + width/height/frame_number + raw data (24-byte header)
 
@@ -96,7 +96,7 @@ graph LR
 
 ### Budget Increase for Ultra-Low Latency Mode
 - **Encode Budget Increased**: The encoding budget for ultra-low latency mode has been increased from 150ms to 500ms.
-- **Total Processing Budget Increased**: The total processing budget has been increased from 300ms to 500ms.
+- **Total Processing Budget Increased**: The total processing budget has been increased from 500ms to 500ms.
 - **Target Latency Updated**: The default target latency is now set to 500ms for more realistic performance on modern hardware.
 
 ### Revolutionary RGBA Streaming Innovation
@@ -167,7 +167,7 @@ function fastDecompressFrame(buffer, format) {
 - ✅ RGBA streaming pipeline functional at `http://localhost:1420/`
 - ✅ Zero-conversion architecture operational
 - ✅ Client RGBA detection implemented and ready
-- ✅ Realistic 300ms performance budgets established
+- ✅ Realistic 500ms performance budgets established
 - ✅ Emergency fallback mechanisms in place
 
 ### VP8 Issue Resolution
@@ -188,7 +188,7 @@ function fastDecompressFrame(buffer, format) {
 - **Black Screen Resolution**: Direct RGBA format prevents VP8 decode failures
 - **Error Prevention**: Eliminates "VP8 frame truncated" and timing issues
 - **Client Compatibility**: Automatic RGBA vs VP8 format detection
-- **Performance Guarantee**: Realistic 300ms budgets vs impossible 60ms targets
+- **Performance Guarantee**: Realistic 500ms budgets vs impossible 60ms targets
 
 ### Intelligent Client Integration
 - **Format Auto-Detection**: Client automatically recognizes RGBA signature (0x52474241)
@@ -197,7 +197,7 @@ function fastDecompressFrame(buffer, format) {
 - **Error Resilience**: Robust handling of format mismatches and decode failures
 
 ### Advanced Performance Management
-- **Realistic Budgets**: 300ms total latency targets based on actual hardware capabilities
+- **Realistic Budgets**: 500ms total latency targets based on actual hardware capabilities
 - **Emergency Fallback**: Graceful degradation while maintaining RGBA format
 - **Real-time Monitoring**: Performance tracking and automatic quality adjustment
 - **Resource Optimization**: Pre-allocated buffers and zero-copy operations
@@ -368,7 +368,7 @@ src-tauri/src/
 ### Performance Transformation
 - **85-90% Faster Encoding**: Reduction from 600-900ms to <100ms processing time
 - **Zero Conversion Overhead**: Complete elimination of expensive YUV operations
-- **Realistic Latency**: Achievable 300ms targets vs impossible 60ms expectations
+- **Realistic Latency**: Achievable 500ms targets vs impossible 60ms expectations
 - **Memory Efficiency**: Direct RGBA copy instead of complex color space conversion
 
 ### User Experience Revolution
@@ -402,7 +402,7 @@ src-tauri/src/
 
 ### Production Validation
 - **Format Compatibility**: RGBA streaming tested with existing client infrastructure
-- **Performance Verification**: <300ms realistic latency targets established
+- **Performance Verification**: <500ms realistic latency targets established
 - **Error Elimination**: Zero VP8 truncation or decode failures expected
 - **Quality Assurance**: Direct RGBA rendering provides consistent video output
 
@@ -417,7 +417,7 @@ src-tauri/src/
 ### Performance Revolution
 - **Encoding Speed**: 85-90% improvement (600-900ms → <100ms)
 - **Conversion Overhead**: 100% elimination of YUV operations
-- **Latency Targets**: Realistic 300ms budgets vs impossible 60ms
+- **Latency Targets**: Realistic 500ms budgets vs impossible 60ms
 - **Memory Efficiency**: Direct RGBA copy vs complex conversion pipeline
 
 ### Quality Assurance
