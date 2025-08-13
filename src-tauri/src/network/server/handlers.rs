@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use tokio::sync::broadcast;
+use log::{info, debug, error};
 
 use super::websocket::{handle_socket_wrapper, handle_socket_wrapper_with_stop};
 
@@ -157,9 +158,128 @@ pub async fn ws_handler_with_stop(
     log::info!("WebSocket connection request - monitor: {}, codec: {}, audio: {}", monitor, codec, audio);
     log::debug!("WebSocket query parameters: {:?}", params);
     
-    // Pass connection parameters to the WebSocket handler with stop signal
-    ws.on_upgrade(move |socket| {
-        log::info!("WebSocket connection established");
-        handle_socket_wrapper_with_stop(socket, monitor, codec, audio, stop_rx)
-    })
+    // Platform-specific handling to avoid Send trait issues on macOS
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, create a simple handler without encoders
+        ws.on_upgrade(move |socket| async move {
+            log::info!("WebSocket connection established (macOS fallback)");
+            if let Err(e) = handle_macos_socket_fallback(socket, monitor, codec, audio, stop_rx).await {
+                error!("macOS WebSocket connection failed: {}", e);
+            }
+        })
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        // On other platforms, use the original handler
+        ws.on_upgrade(move |socket| {
+            log::info!("WebSocket connection established");
+            handle_socket_wrapper_with_stop(socket, monitor, codec, audio, stop_rx)
+        })
+    }
+}
+
+#[cfg(target_os = "macos")]
+async fn handle_macos_socket_fallback(
+    socket: WebSocket, 
+    monitor: usize, 
+    codec: String, 
+    audio: bool,
+    _stop_rx: broadcast::Receiver<()>
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use axum::extract::ws::Message;
+    use futures_util::{SinkExt, StreamExt};
+    use xcap::Monitor;
+    
+    info!("🍎 Using macOS fallback streaming for monitor {}", monitor);
+    
+    let (mut sender, mut receiver) = socket.split();
+    
+    // Send initial info
+    let _ = sender.send(Message::Text(serde_json::json!({
+        "type": "server_info",
+        "version": "3.0.0-macos-fallback",
+        "platform": "macOS",
+        "streaming_mode": "fallback"
+    }).to_string())).await;
+    
+    // Simple capture loop without complex encoders
+    let capture_task = tokio::spawn(async move {
+        let mut frame_count = 0u64;
+        
+        loop {
+            // Get monitors fresh each time to avoid Send issues
+            let monitors = match Monitor::all() {
+                Ok(m) => m,
+                Err(e) => {
+                    error!("Failed to get monitors: {:?}", e);
+                    break;
+                }
+            };
+            
+            let monitor = match monitors.get(monitor) {
+                Some(m) => m,
+                None => {
+                    error!("Monitor {} not found", monitor);
+                    break;
+                }
+            };
+            
+            match monitor.capture_image() {
+                Ok(image) => {
+                    // Create simple frame format
+                    let mut frame_data = Vec::with_capacity(image.as_raw().len() + 24);
+                    frame_data.extend_from_slice(b"RGBA");
+                    frame_data.extend_from_slice(&(image.width() as u32).to_le_bytes());
+                    frame_data.extend_from_slice(&(image.height() as u32).to_le_bytes());
+                    frame_data.extend_from_slice(&frame_count.to_le_bytes());
+                    frame_data.extend_from_slice(&(image.as_raw().len() as u32).to_le_bytes());
+                    frame_data.extend_from_slice(image.as_raw());
+                    
+                    if let Err(_) = sender.send(Message::Binary(frame_data)).await {
+                        break;
+                    }
+                    
+                    frame_count += 1;
+                    
+                    if frame_count % 30 == 0 {
+                        info!("🍎 macOS fallback: sent {} frames", frame_count);
+                    }
+                },
+                Err(e) => {
+                    error!("Capture failed: {:?}", e);
+                }
+            }
+            
+            tokio::time::sleep(tokio::time::Duration::from_millis(33)).await; // ~30 FPS
+        }
+        
+        info!("🍎 macOS fallback capture ended");
+    });
+    
+    // Handle incoming messages
+    while let Some(msg) = receiver.next().await {
+        match msg {
+            Ok(Message::Text(text)) => {
+                debug!("Received control message: {}", text);
+                // Handle control messages if needed
+            },
+            Ok(Message::Binary(_)) => {
+                // Handle binary messages if needed
+            },
+            Ok(Message::Close(_)) => {
+                info!("WebSocket connection closed");
+                break;
+            },
+            Err(e) => {
+                error!("WebSocket error: {}", e);
+                break;
+            },
+            _ => {}
+        }
+    }
+    
+    capture_task.abort();
+    Ok(())
 }

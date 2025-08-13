@@ -7,10 +7,14 @@ use crate::streaming::{
     // EnhancedVideoEncoder,
     // EnhancedAudioEncoder
 };
-use axum::extract::ws::WebSocket;
-use tokio::{sync::broadcast};
+use axum::extract::{ws::{WebSocket, WebSocketUpgrade, Message}, Query};
+use axum::response::IntoResponse;
+use std::collections::HashMap;
+use futures_util::{SinkExt, StreamExt};
+use tokio::sync::broadcast;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 // Control messages for WebSocket communication
 #[derive(Debug, Deserialize, Serialize)]
@@ -144,23 +148,121 @@ async fn handle_integrated_webm_socket(
 }
 
 pub async fn handle_socket_ultra(
-    ws: axum::extract::WebSocketUpgrade,
-    query: axum::extract::Query<std::collections::HashMap<String, String>>,
-) -> impl axum::response::IntoResponse {
-    let monitor = query.get("monitor")
-        .and_then(|m| m.parse::<usize>().ok())
-        .unwrap_or(0);
+    ws: WebSocketUpgrade, 
+    Query(params): Query<HashMap<String, String>>
+) -> impl IntoResponse {
+    let monitor = params.get("monitor").map(|v| v.parse::<usize>().unwrap_or(0)).unwrap_or(0);
 
     info!("🔌 Ultra WebSocket connection request for monitor {}", monitor);
 
-    ws.on_upgrade(move |socket| async move {
-        if let Err(e) = handle_ultra_connection(socket, monitor).await {
-            error!("❌ Ultra WebSocket connection failed: {}", e);
-        }
-    })
+    // Platform-specific handling for macOS Send trait issues
+    #[cfg(target_os = "macos")]
+    {
+        ws.on_upgrade(move |socket| async move {
+            info!("🍎 Using macOS ultra fallback for monitor {}", monitor);
+            if let Err(e) = handle_macos_ultra_fallback(socket, monitor).await {
+                error!("❌ macOS Ultra WebSocket connection failed: {}", e);
+            }
+        })
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        ws.on_upgrade(move |socket| async move {
+            if let Err(e) = handle_ultra_connection(socket, monitor).await {
+                error!("❌ Ultra WebSocket connection failed: {}", e);
+            }
+        })
+    }
 }
 
-async fn handle_ultra_connection(socket: WebSocket, monitor: usize) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+#[cfg(target_os = "macos")]
+async fn handle_macos_ultra_fallback(socket: WebSocket, monitor: usize) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    info!("⚡ Starting macOS ultra-performance fallback streaming for monitor {}", monitor);
+    
+    // Use the same fallback logic as in handlers.rs
+    use axum::extract::ws::Message;
+    use futures_util::{SinkExt, StreamExt};
+    use xcap::Monitor;
+    
+    let (mut sender, mut receiver) = socket.split();
+    
+    // Send initial info
+    let _ = sender.send(Message::Text(serde_json::json!({
+        "type": "server_info",
+        "version": "3.0.0-macos-ultra-fallback",
+        "platform": "macOS",
+        "streaming_mode": "ultra-fallback"
+    }).to_string())).await;
+    
+    // Simple high-performance capture loop
+    let capture_task = tokio::spawn(async move {
+        let mut frame_count = 0u64;
+        
+        loop {
+            let monitors = match Monitor::all() {
+                Ok(m) => m,
+                Err(e) => {
+                    error!("Failed to get monitors: {:?}", e);
+                    break;
+                }
+            };
+            
+            let monitor_obj = match monitors.get(monitor) {
+                Some(m) => m,
+                None => {
+                    error!("Monitor {} not found", monitor);
+                    break;
+                }
+            };
+            
+            match monitor_obj.capture_image() {
+                Ok(image) => {
+                    let mut frame_data = Vec::with_capacity(image.as_raw().len() + 24);
+                    frame_data.extend_from_slice(b"RGBA");
+                    frame_data.extend_from_slice(&(image.width() as u32).to_le_bytes());
+                    frame_data.extend_from_slice(&(image.height() as u32).to_le_bytes());
+                    frame_data.extend_from_slice(&frame_count.to_le_bytes());
+                    frame_data.extend_from_slice(&(image.as_raw().len() as u32).to_le_bytes());
+                    frame_data.extend_from_slice(image.as_raw());
+                    
+                    if let Err(_) = sender.send(Message::Binary(frame_data)).await {
+                        break;
+                    }
+                    
+                    frame_count += 1;
+                },
+                Err(e) => {
+                    error!("Ultra capture failed: {:?}", e);
+                }
+            }
+            
+            tokio::time::sleep(tokio::time::Duration::from_millis(16)).await; // ~60 FPS for ultra mode
+        }
+        
+        info!("🍎 macOS ultra fallback capture ended");
+    });
+    
+    // Handle incoming messages
+    while let Some(msg) = receiver.next().await {
+        match msg {
+            Ok(Message::Close(_)) => {
+                info!("Ultra WebSocket connection closed");
+                break;
+            },
+            Err(e) => {
+                error!("Ultra WebSocket error: {}", e);
+                break;
+            },
+            _ => {}
+        }
+    }
+    
+    capture_task.abort();
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]async fn handle_ultra_connection(socket: WebSocket, monitor: usize) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("⚡ Starting ultra-performance YUV420 + WebM streaming for monitor {}", monitor);
     
     // Create handler before async context to avoid Send issues on macOS
