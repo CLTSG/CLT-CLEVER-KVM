@@ -11,6 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
+package-lock.json
+yarn.lock
+Cargo.lock
+.pnpm-debug.log
 
 # Editor directories and files
 .vscode/*

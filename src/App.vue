@@ -71,7 +71,6 @@ const tabs = computed(() => {
   <main class="container">
     <div class="header">
       <h1>Clever KVM</h1>
-      <p class="description">High-performance remote desktop system for your local network</p>
     </div>
 
     <TabContainer :tabs="tabs" default-tab="status">
