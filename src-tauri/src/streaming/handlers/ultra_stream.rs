@@ -4,15 +4,19 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::{sync::{broadcast, Mutex}, time};
 use log::{debug, error, info, warn};
-use serde_json::json;
 use anyhow::Result;
 use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use parking_lot::RwLock;
+use serde_json::json;
 
-use crate::streaming::{UltraLowLatencyEncoder, UltraLowLatencyConfig, PerformanceTarget};
-use crate::streaming::RealtimeStreamHandler; // Fallback handler
-use crate::core::InputHandler;
-use crate::network::models::NetworkStats;
+use crate::{
+    core::input::InputHandler,
+    network::server::models::NetworkStats,
+    streaming::{
+        enhanced::{UltraLowLatencyEncoder, UltraLowLatencyConfig, UltraPerformanceStats, PerformanceTarget},
+        RealtimeStreamHandler
+    }
+};
 
 /// Ultra-high performance streaming handler for <16ms total latency
 /// Implements Google/Microsoft level optimizations for real-time streaming
@@ -225,13 +229,24 @@ impl UltraStreamHandler {
             
             #[cfg(target_os = "macos")]
             {
-                tokio::spawn(async move {
-                    run_streaming_loop_with_capture_fn(tx, performance_mode_clone2, capture_fn, fallback_handler, fallback_mode, consecutive_failures, emergency_mode_clone).await;
+                // On macOS, avoid tokio::spawn due to Send trait issues
+                // Instead, use a blocking task that doesn't require Send
+                let tx_clone = tx.clone();
+                let performance_clone = Arc::clone(&performance_mode_clone2);
+                std::thread::spawn(move || {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    rt.block_on(async {
+                        run_streaming_loop_macos_direct(tx_clone, performance_clone, monitor_id).await;
+                    });
                 })
             }
             #[cfg(not(target_os = "macos"))]
             {
                 let encoder_clone = Arc::clone(&self.encoder);
+                let fallback_handler = Arc::clone(&fallback_handler);
+                let fallback_mode = Arc::clone(&fallback_mode);
+                let consecutive_failures = Arc::clone(&consecutive_failures);
+                let emergency_mode_clone = Arc::clone(&emergency_mode_clone);
                 tokio::spawn(async move {
                     run_streaming_loop_direct(tx, performance_mode_clone2, encoder_clone, fallback_handler, fallback_mode, consecutive_failures, emergency_mode_clone).await;
                 })
@@ -782,4 +797,78 @@ async fn run_streaming_loop_direct(
     }
     
     info!("🏁 Ultra streaming task ended");
+}
+
+#[cfg(target_os = "macos")]
+async fn run_streaming_loop_macos_direct(
+    tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    _performance_mode: Arc<std::sync::atomic::AtomicBool>,
+    monitor_id: usize
+) {
+    use xcap::Monitor;
+    use std::time::{Duration, Instant};
+    
+    info!("🍎 Starting macOS direct streaming loop for monitor {}", monitor_id);
+    
+    let monitors = Monitor::all().unwrap_or_default();
+    let monitor = monitors.get(monitor_id).cloned();
+    
+    if monitor.is_none() {
+        error!("❌ Monitor {} not found", monitor_id);
+        return;
+    }
+    
+    let monitor = monitor.unwrap();
+    let mut frame_count = 0u64;
+    let mut last_stats_time = Instant::now();
+    
+    loop {
+        let start_time = Instant::now();
+        
+        // Direct capture without encoder to avoid Send trait issues
+        match monitor.capture_image() {
+            Ok(image) => {
+                // Convert to simple RGB data
+                let rgb_data = image.to_rgb8().to_vec();
+                let width = image.width();
+                let height = image.height();
+                
+                // Create simple frame header + data
+                let mut frame_data = Vec::new();
+                frame_data.extend_from_slice(&width.to_le_bytes());
+                frame_data.extend_from_slice(&height.to_le_bytes());
+                frame_data.extend_from_slice(&(rgb_data.len() as u32).to_le_bytes());
+                frame_data.extend_from_slice(&rgb_data);
+                
+                if let Err(_) = tx.send(frame_data) {
+                    break;
+                }
+            }
+            Err(e) => {
+                error!("❌ macOS capture failed: {}", e);
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+        }
+        
+        frame_count += 1;
+        
+        // Stats logging every 2 seconds
+        if last_stats_time.elapsed() > Duration::from_secs(2) {
+            let current_fps = frame_count as f64 / last_stats_time.elapsed().as_secs_f64();
+            info!("🍎 macOS streaming: fps={:.1}, frames={}", current_fps, frame_count);
+            
+            last_stats_time = Instant::now();
+            frame_count = 0;
+        }
+        
+        // Target 30 FPS
+        let frame_time = Duration::from_millis(33);
+        let elapsed = start_time.elapsed();
+        if elapsed < frame_time {
+            tokio::time::sleep(frame_time - elapsed).await;
+        }
+    }
+    
+    info!("🏁 macOS streaming task ended");
 }

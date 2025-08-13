@@ -1,5 +1,5 @@
 use axum::{
-    extract::{ws::WebSocketUpgrade, Query},
+    extract::{ws::{WebSocketUpgrade, WebSocket}, Query},
     response::{Html, IntoResponse},
     http::{StatusCode, header},
 };
@@ -140,8 +140,21 @@ pub async fn ws_handler(ws: WebSocketUpgrade, Query(params): Query<HashMap<Strin
     
     log::debug!("WebSocket connection - monitor: {}, codec: {}, audio: {}", monitor, codec, audio);
     
-    // Pass connection parameters to the WebSocket handler - use 'move' to take ownership
-    ws.on_upgrade(move |socket| handle_socket_wrapper(socket, monitor, codec, audio))
+    // Use platform-specific handlers to avoid Send trait issues
+    #[cfg(target_os = "macos")]
+    {
+        ws.on_upgrade(move |socket| async move {
+            let stop_rx = tokio::sync::broadcast::channel(1).1;
+            if let Err(e) = handle_macos_socket_fallback(socket, monitor, codec, audio, stop_rx).await {
+                log::error!("macOS WebSocket handler failed: {}", e);
+            }
+        })
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        ws.on_upgrade(move |socket| handle_socket_wrapper(socket, monitor, codec, audio))
+    }
 }
 
 pub async fn ws_handler_with_stop(

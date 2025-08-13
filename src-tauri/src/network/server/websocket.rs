@@ -1,9 +1,6 @@
 use crate::streaming::{
     RealtimeConfig, 
-    IntegratedStreamHandler, 
-    IntegratedStreamConfig,
     RealtimeStreamHandler,
-    UltraStreamHandler,
     // EnhancedVideoEncoder,
     // EnhancedAudioEncoder
 };
@@ -112,7 +109,16 @@ async fn handle_integrated_webm_socket(
     info!("🔄 Using RGBA streaming until WebM/VP8 encoding is implemented");
     
     // Create handler before async context to avoid Send issues on macOS
-    let handler_result = UltraStreamHandler::new(monitor);
+    let config = crate::streaming::RealtimeConfig {
+        monitor_id: monitor,
+        width: 1920,
+        height: 1080,
+        bitrate: 4000,
+        framerate: 60,
+        keyframe_interval: 120,
+        target_latency_ms: 50,
+    };
+    let handler_result = RealtimeStreamHandler::new(config);
     
     match handler_result {
         Ok(handler) => {
@@ -262,42 +268,29 @@ async fn handle_macos_ultra_fallback(socket: WebSocket, monitor: usize) -> Resul
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]async fn handle_ultra_connection(socket: WebSocket, monitor: usize) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    info!("⚡ Starting ultra-performance YUV420 + WebM streaming for monitor {}", monitor);
+#[cfg(not(target_os = "macos"))]
+async fn handle_ultra_connection(socket: WebSocket, monitor: usize) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    info!("⚡ Starting ultra-performance streaming for monitor {}", monitor);
     
-    // Create handler before async context to avoid Send issues on macOS
-    let handler_result = crate::streaming::UltraStreamHandler::new(monitor);
+    // Since UltraStreamHandler has Send trait issues, use RealtimeStreamHandler as fallback
+    let enhanced_config = crate::streaming::RealtimeConfig {
+        monitor_id: monitor,
+        width: 1920,
+        height: 1080,
+        bitrate: 8000,
+        framerate: 30,
+        keyframe_interval: 30,
+        target_latency_ms: 120,
+    };
     
-    // Try ultra-performance WebM streaming first
-    match handler_result {
-        Ok(ultra_handler) => {
-            info!("🚀 Using ULTRA-PERFORMANCE YUV420 + WebM streaming mode");
-            ultra_handler.handle_connection(socket, Some(tokio::sync::broadcast::channel(1).1)).await;
+    match RealtimeStreamHandler::new(enhanced_config) {
+        Ok(handler) => {
+            info!("🚀 Using enhanced real-time streaming mode");
+            handler.handle_connection(socket, Some(tokio::sync::broadcast::channel(1).1)).await;
         },
         Err(e) => {
-            warn!("⚠️  Ultra-performance WebM mode failed: {} - falling back to enhanced mode", e);
-            
-            // Fallback to enhanced real-time streaming with WebM support
-            let enhanced_config = crate::streaming::RealtimeConfig {
-                monitor_id: monitor,
-                width: 1920,
-                height: 1080,  
-                bitrate: 10000, // Very high bitrate for excellent WebM quality
-                framerate: 60,  // Smooth framerate
-                keyframe_interval: 60, // Frequent keyframes for WebM stability
-                target_latency_ms: 120, // Optimized latency for WebM
-            };
-            
-            match crate::streaming::RealtimeStreamHandler::new(enhanced_config) {
-                Ok(fallback_handler) => {
-                    info!("🔄 Using ENHANCED WebM real-time streaming mode");
-                    fallback_handler.handle_connection(socket, Some(tokio::sync::broadcast::channel(1).1)).await;
-                },
-                Err(e) => {
-                    error!("❌ Both ultra and enhanced WebM streaming failed: {}", e);
-                    return Err(e.into());
-                }
-            }
+            error!("❌ All streaming modes failed: {}", e);
+            return Err(format!("Streaming initialization failed: {}", e).into());
         }
     }
     
