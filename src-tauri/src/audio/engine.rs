@@ -5,13 +5,12 @@ use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::policy::ice_transport_policy::RTCIceTransportPolicy;
-use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecCapability, RTPCodecType, RTCRtpCodecParameters};
+use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 use webrtc::track::track_local::TrackLocal;
 use webrtc::media::Sample;
 use log::{debug, error, info, warn};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{SystemTime, Duration};
 
 pub struct AudioConfig {
     pub sample_rate: u32,

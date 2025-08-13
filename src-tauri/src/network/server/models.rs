@@ -46,3 +46,13 @@ pub struct NetworkStats {
     pub bandwidth: f32, // in Mbps
     pub packet_loss: f32, // percentage
 }
+
+impl Default for NetworkStats {
+    fn default() -> Self {
+        Self {
+            latency: 50,    // 50ms default latency
+            bandwidth: 10.0, // 10 Mbps default bandwidth
+            packet_loss: 0.0, // 0% packet loss
+        }
+    }
+}

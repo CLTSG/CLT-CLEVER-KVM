@@ -5,10 +5,10 @@ use axum::{
 };
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tokio::sync::broadcast;
 
-use super::websocket::{handle_socket_wrapper, handle_socket_wrapper_with_stop};
+use super::websocket::{handle_socket_wrapper, handle_socket_wrapper_with_stop, handle_socket_ultra};
 
 fn get_web_client_path() -> PathBuf {
     // Try multiple possible locations for the web-client directory
@@ -40,12 +40,10 @@ pub async fn kvm_client_handler(Query(params): Query<HashMap<String, String>>) -
     let remote_only = params.get("remoteOnly").map(|v| v == "true").unwrap_or(false);
     let encryption = params.get("encryption").map(|v| v == "true").unwrap_or(false);
     let monitor = params.get("monitor").map(|v| v.parse::<usize>().unwrap_or(0)).unwrap_or(0);
-    let codec = "vp8"; // Always use VP8
-
+    let codec = params.get("codec").unwrap_or(&"vp8".to_string()).clone();
+    
     log::debug!("KVM client configuration - stretch: {}, mute: {}, audio: {}, monitor: {}, codec: {}", 
-               stretch, mute, audio, monitor, codec);
-
-    // Prepare template replacements
+               stretch, mute, audio, monitor, codec);    // Prepare template replacements
     let replacements = [
         ("{{stretch}}", stretch.to_string()),
         ("{{mute}}", mute.to_string()),
@@ -135,8 +133,11 @@ pub async fn static_file_handler(
 pub async fn ws_handler(ws: WebSocketUpgrade, Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
     // Extract monitor parameter
     let monitor = params.get("monitor").map(|v| v.parse::<usize>().unwrap_or(0)).unwrap_or(0);
-    let codec = "vp8".to_string(); // Always use VP8
+    // Parse codec parameter and default to vp8 if not specified
+    let codec = params.get("codec").unwrap_or(&"vp8".to_string()).clone();
     let audio = params.get("audio").map(|v| v == "true").unwrap_or(false);
+    
+    log::debug!("WebSocket connection - monitor: {}, codec: {}, audio: {}", monitor, codec, audio);
     
     // Pass connection parameters to the WebSocket handler - use 'move' to take ownership
     ws.on_upgrade(move |socket| handle_socket_wrapper(socket, monitor, codec, audio))
@@ -149,10 +150,11 @@ pub async fn ws_handler_with_stop(
 ) -> impl IntoResponse {
     // Extract monitor parameter
     let monitor = params.get("monitor").map(|v| v.parse::<usize>().unwrap_or(0)).unwrap_or(0);
-    let codec = "vp8".to_string(); // Always use VP8
+    // Parse codec parameter and default to vp8 if not specified
+    let codec = params.get("codec").unwrap_or(&"vp8".to_string()).clone();
     let audio = params.get("audio").map(|v| v == "true").unwrap_or(false);
     
-    log::info!("WebSocket connection request - monitor: {}, codec: VP8 (forced), audio: {}", monitor, audio);
+    log::info!("WebSocket connection request - monitor: {}, codec: {}, audio: {}", monitor, codec, audio);
     log::debug!("WebSocket query parameters: {:?}", params);
     
     // Pass connection parameters to the WebSocket handler with stop signal
