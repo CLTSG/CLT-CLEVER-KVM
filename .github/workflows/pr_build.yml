@@ -53,33 +53,6 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
-      - name: Setup FFmpeg (Windows)
-        if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'windows-2022'
-        run: |
-          # Install vcpkg and FFmpeg (what ffmpeg-sys-next expects on Windows)
-          git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
-          cd C:\vcpkg
-          .\bootstrap-vcpkg.bat
-          .\vcpkg.exe integrate install
-          # Install pkg-config first, then FFmpeg with standard triplet
-          .\vcpkg.exe install pkgconf:x64-windows
-          .\vcpkg.exe install ffmpeg[core,avcodec,avformat,avdevice,avfilter,swresample,swscale]:x64-windows
-          echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
-          echo "PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig" >> $env:GITHUB_ENV
-          echo "PATH=C:\vcpkg\installed\x64-windows\tools\pkgconf;$env:PATH" >> $env:GITHUB_ENV
-
-      - name: Setup FFmpeg (Linux)
-        if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config
-          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev
-
-      - name: Setup FFmpeg (macOS)
-        if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'macos-14'
-        run: |
-          brew install pkg-config ffmpeg
-
       - name: Install dependencies (ubuntu only)
         if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'ubuntu-22.04'
         run: |
@@ -91,14 +64,11 @@ jobs:
         run: |
           # Set up environment for cross-compilation
           echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> $GITHUB_ENV
-          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
-          echo "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1" >> $GITHUB_ENV
-          echo "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1" >> $GITHUB_ENV
 
       - name: Install dependencies (Windows only)
         if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'windows-2022'
         run: |
-          echo "Windows dependencies handled by vcpkg"
+          echo "Windows dependencies managed by Tauri"
 
       - name: Install frontend dependencies
         run: npm ci
@@ -106,32 +76,21 @@ jobs:
       - name: Build the app (Release)
         if: ${{ github.event_name == 'workflow_dispatch' && !inputs.debug || github.event_name != 'workflow_dispatch' }}
         env:
-          RUSTFLAGS: ${{ env.RUSTFLAGS }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PKG_CONFIG_ALLOW_SYSTEM_LIBS: 1
-          PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: 1
         run: npm run tauri:build
 
       - name: Build the app (Debug)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug }}
         env:
-          RUSTFLAGS: ${{ env.RUSTFLAGS }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PKG_CONFIG_ALLOW_SYSTEM_LIBS: 1
-          PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: 1
         run: npm run tauri:build:debug
 
       - name: Upload artifacts (Linux)
         if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'ubuntu-22.04'
-        env:
-          RUSTFLAGS: ${{ env.RUSTFLAGS }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         uses: actions/upload-artifact@v4
         with:
           name: clever-kvm-linux
@@ -142,11 +101,6 @@ jobs:
 
       - name: Upload artifacts (Windows)
         if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'windows-2022'
-        env:
-          RUSTFLAGS: ${{ env.RUSTFLAGS }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         uses: actions/upload-artifact@v4
         with:
           name: clever-kvm-windows
@@ -157,12 +111,6 @@ jobs:
 
       - name: Upload artifacts (macOS)
         if: (github.event_name == 'workflow_dispatch' && inputs.platform || matrix.platform) == 'macos-14'
-
-        env:
-          RUSTFLAGS: ${{ env.RUSTFLAGS }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         uses: actions/upload-artifact@v4
         with:
           name: clever-kvm-macos
