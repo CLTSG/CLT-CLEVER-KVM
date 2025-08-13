@@ -26,7 +26,6 @@ mod system;
 use app::{commands::*, ServerState, APP_NAME};
 use log::info;
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
 
 fn main() {
     // Initialize logging first

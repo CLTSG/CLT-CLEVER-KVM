@@ -10,6 +10,18 @@ use xcap::Monitor;
 use rayon::prelude::*; // Parallel processing
 use crate::network::models::NetworkStats;
 
+/// Send-safe monitor information extracted from xcap::Monitor
+/// This struct contains only the essential data needed for streaming
+#[derive(Debug, Clone)]
+pub struct MonitorInfo {
+    pub id: String,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub x: i32,
+    pub y: i32,
+}
+
 /// Ultra-low latency codec errors
 #[derive(Error, Debug)]
 pub enum UltraLowLatencyError {
@@ -562,5 +574,23 @@ impl UltraLowLatencyEncoder {
     /// Force keyframe
     pub fn force_keyframe(&self) {
         self.last_keyframe.store(0, Ordering::Relaxed);
+    }
+    
+    /// Extract monitor information for Send-safe use
+    /// This method extracts essential monitor data to avoid Send trait issues on macOS
+    pub fn get_monitor_info(&self) -> MonitorInfo {
+        MonitorInfo {
+            id: self.monitor.id().to_string(),
+            name: self.monitor.name().to_string(),
+            width: self.monitor.width() as u32,
+            height: self.monitor.height() as u32,
+            x: self.monitor.x(),
+            y: self.monitor.y(),
+        }
+    }
+    
+    /// Get the encoder configuration
+    pub fn get_config(&self) -> &UltraLowLatencyConfig {
+        &self.config
     }
 }

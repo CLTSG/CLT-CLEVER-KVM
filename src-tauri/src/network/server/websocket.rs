@@ -107,7 +107,10 @@ async fn handle_integrated_webm_socket(
     // For now, fall back to working RGBA streaming
     info!("🔄 Using RGBA streaming until WebM/VP8 encoding is implemented");
     
-    match UltraStreamHandler::new(monitor) {
+    // Create handler before async context to avoid Send issues on macOS
+    let handler_result = UltraStreamHandler::new(monitor);
+    
+    match handler_result {
         Ok(handler) => {
             info!("✅ RGBA streaming handler initialized successfully");
             handler.handle_connection(socket, stop_rx).await;
@@ -160,8 +163,11 @@ pub async fn handle_socket_ultra(
 async fn handle_ultra_connection(socket: WebSocket, monitor: usize) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("⚡ Starting ultra-performance YUV420 + WebM streaming for monitor {}", monitor);
     
+    // Create handler before async context to avoid Send issues on macOS
+    let handler_result = crate::streaming::UltraStreamHandler::new(monitor);
+    
     // Try ultra-performance WebM streaming first
-    match crate::streaming::UltraStreamHandler::new(monitor) {
+    match handler_result {
         Ok(ultra_handler) => {
             info!("🚀 Using ULTRA-PERFORMANCE YUV420 + WebM streaming mode");
             ultra_handler.handle_connection(socket, Some(tokio::sync::broadcast::channel(1).1)).await;

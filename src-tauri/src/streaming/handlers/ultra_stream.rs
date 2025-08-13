@@ -175,161 +175,43 @@ impl UltraStreamHandler {
         let consecutive_failures = Arc::new(AtomicU64::new(0));
         let performance_mode_clone3 = Arc::clone(&self.performance_mode);
         
+        // Extract monitor info before spawning to avoid Send issues on macOS
+        let monitor_info = {
+            let encoder_guard = self.encoder.lock().await;
+            encoder_guard.get_monitor_info()
+        };
+        
+        // Platform-specific handling for Send trait issues on macOS
+        #[cfg(target_os = "macos")]
         let streaming_task = {
             let tx = tx.clone();
             let performance_mode_clone2 = Arc::clone(&performance_mode_clone);
+            let monitor_id = {
+                let encoder_guard = self.encoder.lock().await;
+                encoder_guard.get_config().monitor_id
+            };
+            
             tokio::spawn(async move {
-                let mut frame_count = 0u64;
-                let mut last_keyframe_time = Instant::now();
-                let mut last_stats_time = Instant::now();
-                let mut consecutive_budget_violations = 0u32;
+                // Create a new encoder for this task to avoid Send issues
+                let task_encoder = match create_task_encoder(monitor_id).await {
+                    Ok(enc) => enc,
+                    Err(e) => {
+                        error!("Failed to create task encoder: {}", e);
+                        return;
+                    }
+                };
                 
-                loop {
-                    let interval_ms = {
-                        let performance_mode = performance_mode_clone2.read();
-                        performance_mode.get_interval_ms()
-                    };
-                    
-                    let mut interval = time::interval(Duration::from_millis(interval_ms));
-                    interval.tick().await;
-                    
-                    // Check if we should force a keyframe (every 1 second)
-                    let force_keyframe = last_keyframe_time.elapsed() > Duration::from_secs(1);
-                    
-                    // ULTRA-FAST CAPTURE AND ENCODE
-                    let capture_start = Instant::now();
-                    let encoded_data = {
-                        let encoder = encoder_clone.lock().await;
-                        
-                        match encoder.capture_and_encode_ultra_fast(force_keyframe) {
-                            Ok(Some(data)) => {
-                                consecutive_budget_violations = 0; // Reset on success
-                                data
-                            },
-                            Ok(None) => continue, // No data to send
-                            Err(e) => {
-                                error!("🔴 Ultra-encode error: {}", e);
-                                consecutive_budget_violations += 1;
-                                
-                                // Track consecutive failures for fallback decision
-                                let current_failures = consecutive_failures.fetch_add(1, Ordering::Relaxed) + 1;
-                                
-                                // Activate fallback mode immediately for compatibility
-                                if current_failures >= 1 && !fallback_mode.load(Ordering::Relaxed) {
-                                    warn!("🔄 SWITCHING TO FALLBACK REALTIME STREAMING - Ultra mode failing consistently");
-                                    fallback_mode.store(true, Ordering::Relaxed);
-                                    
-                                    // Initialize fallback handler
-                                    let fallback_config = crate::streaming::RealtimeConfig {
-                                        monitor_id: 0,
-                                        width: 1920,
-                                        height: 1080,
-                                        framerate: 30,      // Lower FPS for stability
-                                        bitrate: 2000,      // 2 Mbps for stable streaming
-                                        keyframe_interval: 90, // Every 3 seconds at 30fps
-                                        target_latency_ms: 100, // Higher latency for stability
-                                    };
-                                    
-                                    match crate::streaming::RealtimeStreamHandler::new(fallback_config) {
-                                        Ok(fallback) => {
-                                            let mut fallback_handler_guard = fallback_handler.lock().await;
-                                            *fallback_handler_guard = Some(fallback);
-                                            info!("✅ Fallback handler initialized - switching to stable streaming");
-                                        },
-                                        Err(e) => {
-                                            error!("Failed to initialize fallback handler: {}", e);
-                                        }
-                                    }
-                                }
-                                
-                                // If in fallback mode, use simplified capture
-                                if fallback_mode.load(Ordering::Relaxed) {
-                                    info!("📹 Using fallback streaming mode");
-                                    // Use a simple fallback capture that doesn't require self
-                                    match fallback_simple_capture().await {
-                                        Ok(Some(data)) => data,
-                                        Ok(None) => continue,
-                                        Err(e) => {
-                                            error!("Fallback capture failed: {}", e);
-                                            continue;
-                                        }
-                                    }
-                                } else {
-                                    // Emergency performance mode activation
-                                    if consecutive_budget_violations >= 3 && !emergency_mode_clone.load(Ordering::Relaxed) {
-                                        warn!("🚨 ACTIVATING EMERGENCY PERFORMANCE MODE");
-                                        emergency_mode_clone.store(true, Ordering::Relaxed);
-                                        encoder.emergency_performance_mode();
-                                        
-                                        // Switch to emergency performance mode
-                                        let mut mode = performance_mode_clone2.write();
-                                        *mode = PerformanceMode::Emergency;
-                                    }
-                                    
-                                    tokio::time::sleep(Duration::from_millis(8)).await; // Minimal backoff
-                                    continue;
-                                }
-                            }
-                        }
-                    };
-                    
-                    // Reset failure counter on any successful operation
-                    if !fallback_mode.load(Ordering::Relaxed) {
-                        consecutive_failures.store(0, Ordering::Relaxed);
-                    }
-                    
-                    let total_time = capture_start.elapsed();
-                    
-                    if force_keyframe {
-                        last_keyframe_time = Instant::now();
-                    }
-                    
-                    frame_count += 1;
-                    
-                    // ZERO-LATENCY FRAME TRANSMISSION
-                    let send_start = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_nanos() as u64;
-                    
-                    if let Err(_) = tx.send(encoded_data).await {
-                        break; // Channel closed
-                    }
-                    
-                    // Ultra-performance monitoring
-                    if last_stats_time.elapsed() > Duration::from_secs(2) {
-                        let encoder = encoder_clone.lock().await;
-                        let (capture_ms, encode_ms, total_frames, dropped_frames, latency_ms, quality_level) = 
-                            encoder.get_ultra_performance_stats();
-                        
-                        let current_fps = frame_count as f64 / last_stats_time.elapsed().as_secs_f64();
-                        
-                        info!("⚡ ULTRA-PERF: fps={:.1}, capture={:.1}ms, encode={:.1}ms, latency={}ms, quality={}%, drops={}", 
-                              current_fps, capture_ms, encode_ms, latency_ms, quality_level, dropped_frames);
-                        
-                        // Auto-optimize performance mode based on results
-                        if latency_ms < 8 && dropped_frames == 0 {
-                            // Excellent performance - can use gaming mode
-                            let mut mode = performance_mode_clone2.write();
-                            if !matches!(*mode, PerformanceMode::Gaming) {
-                                *mode = PerformanceMode::Gaming;
-                                info!("🎮 Switching to GAMING mode (ultra-low latency achieved)");
-                            }
-                        } else if latency_ms > 32 || dropped_frames > total_frames / 10 {
-                            // Poor performance - use balanced mode
-                            let mut mode = performance_mode_clone2.write();
-                            if !matches!(*mode, PerformanceMode::Balanced | PerformanceMode::Emergency) {
-                                *mode = PerformanceMode::Balanced;
-                                info!("⚖️  Switching to BALANCED mode (performance issues detected)");
-                            }
-                        }
-                        
-                        last_stats_time = Instant::now();
-                        frame_count = 0; // Reset for next measurement period
-                    }
-                }
-                
-                info!("🏁 Ultra streaming task ended");
+                run_streaming_loop(tx, performance_mode_clone2, task_encoder, fallback_handler, fallback_mode, consecutive_failures, emergency_mode_clone).await;
+            })
+        };
+        
+        #[cfg(not(target_os = "macos"))]
+        let streaming_task = {
+            let tx = tx.clone();
+            let performance_mode_clone2 = Arc::clone(&performance_mode_clone);
+            let encoder_clone = Arc::clone(&self.encoder);
+            tokio::spawn(async move {
+                run_streaming_loop_with_encoder(tx, performance_mode_clone2, encoder_clone, fallback_handler, fallback_mode, consecutive_failures, emergency_mode_clone).await;
             })
         };
         
@@ -665,4 +547,137 @@ fn compress_plane_blocks(plane_data: &[u8], width: usize, height: usize, block_s
             }
         }
     }
+}
+
+// Helper functions for platform-specific handling
+
+#[cfg(target_os = "macos")]
+async fn create_task_encoder(monitor_id: usize) -> Result<Arc<Mutex<crate::streaming::UltraLowLatencyEncoder>>, anyhow::Error> {
+    let config = crate::streaming::UltraLowLatencyConfig {
+        monitor_id,
+        width: 1920,
+        height: 1080,
+        performance_target: crate::streaming::PerformanceTarget::ultra_low_latency(),
+        use_hardware_acceleration: true,
+        enable_simd_optimization: true,
+        enable_parallel_processing: true,
+        adaptive_quality: true,
+        target_latency_ms: 50,
+    };
+    
+    match crate::streaming::UltraLowLatencyEncoder::new(config) {
+        Ok(enc) => Ok(Arc::new(Mutex::new(enc))),
+        Err(e) => Err(anyhow::anyhow!("Failed to create encoder: {}", e)),
+    }
+}
+
+async fn run_streaming_loop(
+    tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+    performance_mode_clone: Arc<RwLock<PerformanceMode>>,
+    task_encoder: Arc<Mutex<crate::streaming::UltraLowLatencyEncoder>>,
+    fallback_handler: Arc<Mutex<Option<crate::streaming::RealtimeStreamHandler>>>,
+    fallback_mode: Arc<AtomicBool>,
+    consecutive_failures: Arc<AtomicU64>,
+    emergency_mode_clone: Arc<AtomicBool>,
+) {
+    let mut frame_count = 0u64;
+    let mut last_keyframe_time = Instant::now();
+    let mut last_stats_time = Instant::now();
+    let mut consecutive_budget_violations = 0u32;
+    
+    loop {
+        let interval_ms = {
+            let performance_mode = performance_mode_clone.read();
+            performance_mode.get_interval_ms()
+        };
+        
+        let force_keyframe = last_keyframe_time.elapsed() > Duration::from_secs(2) ||
+                           frame_count % 60 == 0;
+        
+        // ULTRA-FAST CAPTURE AND ENCODE
+        let capture_start = Instant::now();
+        let encoded_data = {
+            let encoder = task_encoder.lock().await;
+            
+            match encoder.capture_and_encode_ultra_fast(force_keyframe) {
+                Ok(Some(data)) => {
+                    consecutive_budget_violations = 0;
+                    data
+                },
+                Ok(None) => continue,
+                Err(e) => {
+                    error!("🔴 Ultra-encode error: {}", e);
+                    consecutive_budget_violations += 1;
+                    
+                    let current_failures = consecutive_failures.fetch_add(1, Ordering::Relaxed) + 1;
+                    
+                    if current_failures >= 1 && !fallback_mode.load(Ordering::Relaxed) {
+                        warn!("🔄 SWITCHING TO FALLBACK REALTIME STREAMING");
+                        fallback_mode.store(true, Ordering::Relaxed);
+                    }
+                    
+                    if fallback_mode.load(Ordering::Relaxed) {
+                        match fallback_simple_capture().await {
+                            Ok(Some(data)) => data,
+                            Ok(None) => continue,
+                            Err(e) => {
+                                error!("Fallback capture failed: {}", e);
+                                continue;
+                            }
+                        }
+                    } else {
+                        tokio::time::sleep(Duration::from_millis(8)).await;
+                        continue;
+                    }
+                }
+            }
+        };
+        
+        if !fallback_mode.load(Ordering::Relaxed) {
+            consecutive_failures.store(0, Ordering::Relaxed);
+        }
+        
+        if force_keyframe {
+            last_keyframe_time = Instant::now();
+        }
+        
+        frame_count += 1;
+        
+        if let Err(_) = tx.send(encoded_data).await {
+            break;
+        }
+        
+        // Performance monitoring
+        if last_stats_time.elapsed() > Duration::from_secs(2) {
+            let encoder = task_encoder.lock().await;
+            let (capture_ms, encode_ms, total_frames, dropped_frames, latency_ms, quality_level) = 
+                encoder.get_ultra_performance_stats();
+            
+            let current_fps = frame_count as f64 / last_stats_time.elapsed().as_secs_f64();
+            
+            info!("⚡ ULTRA-PERF: fps={:.1}, capture={:.1}ms, encode={:.1}ms, latency={}ms, quality={}%, drops={}", 
+                  current_fps, capture_ms, encode_ms, latency_ms, quality_level, dropped_frames);
+            
+            last_stats_time = Instant::now();
+            frame_count = 0;
+        }
+        
+        tokio::time::sleep(Duration::from_millis(interval_ms)).await;
+    }
+    
+    info!("🏁 Ultra streaming task ended");
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn run_streaming_loop_with_encoder(
+    tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+    performance_mode_clone: Arc<RwLock<PerformanceMode>>,
+    encoder_clone: Arc<Mutex<crate::streaming::UltraLowLatencyEncoder>>,
+    fallback_handler: Arc<Mutex<Option<crate::streaming::RealtimeStreamHandler>>>,
+    fallback_mode: Arc<AtomicBool>,
+    consecutive_failures: Arc<AtomicU64>,
+    emergency_mode_clone: Arc<AtomicBool>,
+) {
+    // On non-macOS platforms, we can use the encoder directly
+    run_streaming_loop(tx, performance_mode_clone, encoder_clone, fallback_handler, fallback_mode, consecutive_failures, emergency_mode_clone).await;
 }
