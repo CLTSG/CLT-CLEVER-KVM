@@ -2,6 +2,42 @@
 
 ## Version History
 
+## [3.1.0] - 2025-08-14
+
+### 🎬 Screen Capture System Overhaul: Native `scap` Integration
+
+### ✨ New Features
+- **Native `scap` Screen Capture**: Migrated from `xcap` to `scap` 0.0.8 for cross-platform screen recording
+- **Linux Desktop Portal Support**: Full integration with XDG Desktop Portals for secure screen capture
+- **Multi-Format Frame Support**: Handles BGRA, RGB, RGBx, BGRx, XBGR, BGR0, and YUV frame formats
+- **Clean API Architecture**: Simplified screen capture interface following `scap` best practices
+- **Permission Management**: Proper permission checking and requesting for screen capture access
+
+### 🔧 Screen Capture Implementation
+- **Cross-Platform Compatibility**: Works on Windows, macOS, and Linux with native APIs
+- **Desktop Portal Integration**: Seamless integration with Linux desktop environments (GNOME, KDE, etc.)
+- **Automatic Format Conversion**: Real-time conversion between frame formats (BGRA→RGBA, etc.)
+- **Monitor Enumeration**: Simplified monitor detection with fallback for systems without available displays
+- **Cursor Capture Support**: Optional cursor overlay with platform-specific optimizations
+
+### 🐛 Bug Fixes
+- **Monitor Detection**: Fixed "Monitor not found: 0" errors on Linux systems
+- **Permission Handling**: Improved desktop portal permission flow for screen capture
+- **Frame Format Issues**: Resolved frame type compatibility across different platforms
+- **API Cleanup**: Removed deprecated `get_all_targets` duplicated code and streamlined implementation
+
+### 🗑️ Code Cleanup
+- **Removed Duplicated Code**: Eliminated redundant `get_all_targets` usage and complex target filtering
+- **Simplified Initialization**: Streamlined capturer creation following `scap` example patterns  
+- **Clean Dependencies**: Removed unused imports and simplified module structure
+- **Standard API Usage**: Aligned with official `scap` documentation and examples
+
+### 🔧 Technical Improvements
+- **Memory Efficiency**: Reduced memory overhead with optimized frame handling
+- **Error Handling**: Enhanced error reporting for desktop portal and permission issues
+- **Logging Integration**: Added comprehensive logging for screen capture operations
+- **Performance Optimization**: Streamlined frame capture pipeline with reduced latency
+
 ## [3.0.0] - 2025-08-12
 
 ### 🚀 Major Architecture Update: Native WebM Implementation

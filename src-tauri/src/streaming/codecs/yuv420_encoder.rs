@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicU64, AtomicU32, Ordering};
 use std::sync::Arc;
 use parking_lot::{Mutex, RwLock};
-use xcap::Monitor;
+use scap::{Target, get_all_targets};
 use rayon::prelude::*;
 use image::{ImageBuffer, Rgba, DynamicImage};
 
@@ -152,7 +152,7 @@ impl YUV420Frame {
 /// Simplified YUV420 encoder for stable screen streaming
 pub struct YUV420Encoder {
     config: YUV420Config,
-    monitor: Monitor,
+    monitor: Option<Target>, // Changed from Monitor to Target
     frame_count: AtomicU64,
     last_keyframe: AtomicU64,
     
@@ -222,17 +222,22 @@ impl YUV420Encoder {
         }
         
         // Get monitor
-        let monitors = Monitor::all()
-            .map_err(|e| YUV420EncoderError::Capture(format!("Failed to get monitors: {}", e)))?;
-        let monitor = monitors.get(config.monitor_id)
-            .ok_or_else(|| YUV420EncoderError::Capture(format!("Monitor {} not found", config.monitor_id)))?
-            .clone();
+        let targets = get_all_targets();
+        let displays: Vec<_> = targets.into_iter()
+            .filter(|target| matches!(target, Target::Display(_)))
+            .collect();
         
-        info!("Using monitor: {} ({}x{})", monitor.name(), monitor.width(), monitor.height());
+        let monitor = if config.monitor_id < displays.len() {
+            displays.into_iter().nth(config.monitor_id)
+        } else {
+            None
+        }.ok_or_else(|| YUV420EncoderError::Capture(format!("Monitor {} not found", config.monitor_id)))?;
+        
+        info!("Using display target for monitor {}", config.monitor_id);
         
         let encoder = Self {
             config: config.clone(),
-            monitor,
+            monitor: Some(monitor),
             frame_count: AtomicU64::new(0),
             last_keyframe: AtomicU64::new(0),
             encoding_stats: Arc::new(EncodingStats::new()),
@@ -252,61 +257,10 @@ impl YUV420Encoder {
     
     /// Capture and encode a frame
     pub fn capture_and_encode(&mut self, force_keyframe: bool) -> Result<Option<Vec<u8>>, YUV420EncoderError> {
-        let start_time = Instant::now();
-        
-        // Capture screen
-        let image = self.monitor.capture_image()
-            .map_err(|e| YUV420EncoderError::Capture(format!("Screen capture failed: {}", e)))?;
-        
-        let capture_time = start_time.elapsed();
-        
-        // Convert to RGBA if needed
-        let rgba_data = image.as_raw();
-        let width = image.width();
-        let height = image.height();
-        
-        // Resize if necessary
-        let (final_width, final_height, processed_rgba) = if width != self.config.width || height != self.config.height {
-            let resized = self.resize_rgba(rgba_data, width, height, self.config.width, self.config.height)?;
-            (self.config.width, self.config.height, resized)
-        } else {
-            (width, height, rgba_data.to_vec())
-        };
-        
-        // Convert to YUV420
-        let frame_number = self.frame_count.fetch_add(1, Ordering::Relaxed);
-        let yuv_frame = YUV420Frame::from_rgba(&processed_rgba, final_width, final_height, frame_number)
-            .map_err(|e| YUV420EncoderError::YUVConversion(format!("RGBA to YUV conversion failed: {}", e)))?;
-        
-        // Determine if this should be a keyframe
-        let should_keyframe = force_keyframe || 
-            (frame_number - self.last_keyframe.load(Ordering::Relaxed)) >= self.config.keyframe_interval as u64;
-        
-        if should_keyframe {
-            self.last_keyframe.store(frame_number, Ordering::Relaxed);
-        }
-        
-        // Encode the frame
-        let encoded_data = self.encode_yuv_frame(yuv_frame, should_keyframe)?;
-        
-        let total_time = start_time.elapsed();
-        
-        // Update statistics
-        self.encoding_stats.update_frame_stats(
-            should_keyframe, 
-            encoded_data.as_ref().map(|d| d.len()).unwrap_or(0),
-            total_time.as_millis() as u32
-        );
-        
-        // Log performance occasionally
-        if frame_number % 30 == 0 {
-            debug!("Frame {}: capture={:.1}ms, total={:.1}ms, keyframe={}", 
-                   frame_number, capture_time.as_millis(), total_time.as_millis(), should_keyframe);
-        }
-        
-        Ok(encoded_data)
+        // Note: Direct image capture needs to be implemented with scap integration
+        todo!("capture_and_encode needs to be updated to use ScreenCapture with scap")
     }
-    
+
     /// Encode a YUV420 frame (simplified version for now)
     fn encode_yuv_frame(&mut self, yuv_frame: YUV420Frame, is_keyframe: bool) -> Result<Option<Vec<u8>>, YUV420EncoderError> {
         // For now, return the raw YUV420 data as a simple encoded frame

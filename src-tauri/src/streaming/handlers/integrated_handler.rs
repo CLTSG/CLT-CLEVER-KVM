@@ -9,6 +9,7 @@ use tokio::sync::mpsc;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use scap::get_all_targets;
 
 use crate::streaming::{
     YUV420Encoder, YUV420Config, YUV420EncoderError,
@@ -637,13 +638,15 @@ impl IntegratedStreamHandler {
         
         let server_info = ServerInfo {
             hostname: gethostname::gethostname().to_string_lossy().to_string(),
-            monitor_count: xcap::Monitor::all().unwrap_or_default().len(),
+            monitor_count: get_all_targets().len(),
             current_monitor: self.config.monitor_id,
             capabilities: vec![
                 "yuv420_vp8".to_string(),
                 "webm_container".to_string(),
                 if self.config.enable_audio { "opus_audio" } else { "no_audio" }.to_string(),
                 "adaptive_quality".to_string(),
+                "enhanced_capture".to_string(), // Our enhanced xcap wrapper
+                "yuv420_output".to_string(), // YUV support via our converter
             ],
         };
         

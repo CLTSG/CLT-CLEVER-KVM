@@ -108,9 +108,8 @@ impl RealtimeStreamHandler {
                     let encoded_data = {
                         let mut encoder = encoder_clone.lock().await;
                         
-                        match encoder.capture_and_encode(force_keyframe) {
-                            Ok(Some(data)) => data,
-                            Ok(None) => continue, // No data to send
+                        match encoder.capture_and_encode() {
+                            Ok(data) => data,
                             Err(e) => {
                                 error!("Capture/encode error: {}", e);
                                 // Reduce error backoff time for better real-time performance

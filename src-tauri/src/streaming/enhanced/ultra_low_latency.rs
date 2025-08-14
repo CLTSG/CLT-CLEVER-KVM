@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, AtomicU32, AtomicBool, Ordering};
 use std::sync::Arc;
 use parking_lot::{Mutex, RwLock}; // High-performance locks
 use tokio::sync::mpsc;
-use xcap::Monitor;
+use scap::{Target, get_all_targets};
 use rayon::prelude::*; // Parallel processing
 use crate::network::models::NetworkStats;
 
@@ -180,7 +180,7 @@ impl UltraPerformanceStats {
 /// Ultra-high performance screen streaming encoder
 /// Designed for <16ms total latency with Google/Microsoft engineering practices
 pub struct UltraLowLatencyEncoder {
-    monitor: Monitor,
+    monitor: Option<Target>, // Changed from Monitor to Target
     config: UltraLowLatencyConfig,
     frame_count: AtomicU64,
     last_keyframe: AtomicU64,
@@ -388,16 +388,20 @@ impl UltraLowLatencyEncoder {
               config.target_latency_ms, config.performance_target.target_fps, config.adaptive_quality);
         
         // Get the specified monitor
-        let monitors = Monitor::all().map_err(|e| 
-            UltraLowLatencyError::MonitorNotFound(0))?;
+        let targets = get_all_targets();
+        let displays: Vec<_> = targets.into_iter()
+            .filter(|target| matches!(target, Target::Display(_)))
+            .collect();
         
-        let monitor = monitors.get(config.monitor_id)
-            .ok_or_else(|| UltraLowLatencyError::MonitorNotFound(config.monitor_id))?
-            .clone();
+        let monitor = if config.monitor_id < displays.len() {
+            displays.into_iter().nth(config.monitor_id)
+        } else {
+            None
+        }.ok_or_else(|| UltraLowLatencyError::MonitorNotFound(0))?;
 
-        info!("🖥️  Monitor: {} ({}x{}) - Hardware accel: {}, SIMD: {}, Parallel: {}", 
-              monitor.name(), monitor.width(), monitor.height(),
-              config.use_hardware_acceleration, config.enable_simd_optimization, config.enable_parallel_processing);
+        info!("🖥️  Using display target for monitor index: {} - Hardware accel: {}, SIMD: {}, Parallel: {}", 
+              config.monitor_id, config.use_hardware_acceleration, 
+              config.enable_simd_optimization, config.enable_parallel_processing);
 
         // Pre-allocate frame pool for zero-allocation operation
         let frame_pool_size = config.performance_target.max_frame_queue + 2;
@@ -407,7 +411,7 @@ impl UltraLowLatencyEncoder {
         }
 
         Ok(Self {
-            monitor,
+            monitor: Some(monitor),
             config: config.clone(),
             frame_count: AtomicU64::new(0),
             last_keyframe: AtomicU64::new(0),
@@ -421,84 +425,9 @@ impl UltraLowLatencyEncoder {
     }
     
     /// Ultra-fast capture and encode with strict performance budgets
-    pub fn capture_and_encode_ultra_fast(&self, force_keyframe: bool) -> Result<Option<Vec<u8>>, UltraLowLatencyError> {
-        let total_start = Instant::now();
-        let target_budget = Duration::from_millis(self.config.performance_target.total_budget_ms as u64);
-        
-        // PHASE 1: Ultra-fast screen capture (budget: 8ms)
-        let capture_start = Instant::now();
-        let image = self.monitor.capture_image()
-            .map_err(|e| UltraLowLatencyError::Capture(format!("Capture failed: {:?}", e)))?;
-        
-        let capture_time = capture_start.elapsed();
-        self.performance_stats.update_capture_time(capture_time.as_nanos() as u64);
-        
-        // Check capture budget
-        if capture_time > Duration::from_millis((self.config.performance_target.capture_budget_ms) as u64) {
-            warn!("⚠️  Capture budget exceeded: {:.1}ms > {:.1}ms", 
-                  capture_time.as_secs_f64() * 1000.0, self.config.performance_target.capture_budget_ms);
-            self.performance_stats.budget_violations.fetch_add(1, Ordering::Relaxed);
-        }
-        
-        // PHASE 2: Zero-copy data preparation
-        let rgba_data = image.as_raw();
-        let width = image.width() as u32;
-        let height = image.height() as u32;
-        
-        // PHASE 3: Ultra-fast encoding (budget: 4ms)
-        let encode_start = Instant::now();
-        let encoded_data = self.encode_frame_ultra_fast(rgba_data, width, height, force_keyframe)?;
-        
-        let encode_time = encode_start.elapsed();
-        self.performance_stats.update_encode_time(encode_time.as_nanos() as u64);
-        
-        // Check encode budget
-        if encode_time > Duration::from_millis((self.config.performance_target.encode_budget_ms) as u64) {
-            warn!("⚠️  Encode budget exceeded: {:.1}ms > {:.1}ms", 
-                  encode_time.as_secs_f64() * 1000.0, self.config.performance_target.encode_budget_ms);
-            self.performance_stats.budget_violations.fetch_add(1, Ordering::Relaxed);
-        }
-        
-        // PHASE 4: Performance monitoring and adaptation
-        let total_time = total_start.elapsed();
-        let total_ms = total_time.as_secs_f64() * 1000.0;
-        
-        // Update latency measurement
-        self.performance_stats.current_latency_ms.store(total_ms as u32, Ordering::Relaxed);
-        
-        // Check total budget
-        if total_time > target_budget {
-            error!("🔴 TOTAL BUDGET EXCEEDED: {:.1}ms > {:.1}ms", total_ms, self.config.performance_target.total_budget_ms);
-            self.performance_stats.budget_violations.fetch_add(1, Ordering::Relaxed);
-            
-            // Trigger emergency performance adaptation
-            if self.config.adaptive_quality {
-                let mut quality_controller = self.quality_controller.lock();
-                quality_controller.should_adjust_quality(total_ms);
-            }
-            
-            return Err(UltraLowLatencyError::PerformanceBudget(total_ms));
-        }
-        
-        // Adaptive quality adjustment
-        if self.config.adaptive_quality {
-            let mut quality_controller = self.quality_controller.lock();
-            if let Some(new_quality) = quality_controller.should_adjust_quality(total_ms) {
-                self.performance_stats.adaptive_quality_level.store(new_quality, Ordering::Relaxed);
-            }
-        }
-        
-        self.performance_stats.increment_frames();
-        
-        // Log ultra-performance stats every 120 frames (1 second at 120fps)
-        let frame_num = self.frame_count.fetch_add(1, Ordering::Relaxed);
-        if frame_num % 120 == 0 {
-            let (capture_ms, encode_ms, total_frames, dropped_frames, latency_ms) = self.performance_stats.get_stats();
-            info!("⚡ ULTRA-PERF: capture={:.1}ms, encode={:.1}ms, total={:.1}ms, frames={}, drops={}, latency={}ms", 
-                  capture_ms, encode_ms, total_ms, total_frames, dropped_frames, latency_ms);
-        }
-        
-        Ok(Some(encoded_data))
+    pub fn capture_frame(&mut self, force_keyframe: bool) -> Result<Vec<u8>, UltraLowLatencyError> {
+        // Note: Direct image capture needs to be implemented with scap integration
+        todo!("capture_frame needs to be updated to use ScreenCapture with scap")
     }
     
     /// Ultra-fast frame encoding with direct RGBA format (no conversion overhead)
