@@ -199,14 +199,13 @@ impl UltraStreamHandler {
                     // ULTRA-FAST CAPTURE AND ENCODE
                     let capture_start = Instant::now();
                     let encoded_data = {
-                        let encoder = encoder_clone.lock().await;
+                        let mut encoder = encoder_clone.lock().await;
                         
-                        match encoder.capture_and_encode_ultra_fast(force_keyframe) {
-                            Ok(Some(data)) => {
+                        match encoder.capture_frame(force_keyframe) {
+                            Ok(data) => {
                                 consecutive_budget_violations = 0; // Reset on success
                                 data
                             },
-                            Ok(None) => continue, // No data to send
                             Err(e) => {
                                 error!("🔴 Ultra-encode error: {}", e);
                                 consecutive_budget_violations += 1;

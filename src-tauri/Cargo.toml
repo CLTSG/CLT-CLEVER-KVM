@@ -1,6 +1,6 @@
 [package]
 name = "clever-kvm"
-version = "3.0.0"
+version = "3.1.0"
 description = "A KVM solution built with Tauri"
 authors = ["Clever Technologies"]
 license = "MIT"
@@ -33,7 +33,7 @@ gethostname = "0.4.3"
 
 # Ultra-performance dependencies for streaming
 webrtc = "0.11.0"
-xcap = "0.0.10"
+scap = "0.0.8"
 anyhow = "1.0.75"
 thiserror = "1.0.50"
 
@@ -56,3 +56,4 @@ custom-protocol = ["tauri/custom-protocol"]
 # Ultra-performance features
 default = ["mimalloc"] # Use Microsoft's allocator by default for best performance
 ultra-performance = ["mimalloc"] # Enable all performance optimizations
+# scap-capture = ["scap"] # Future: Enable scap for enhanced capture (currently disabled due to beta issues)
