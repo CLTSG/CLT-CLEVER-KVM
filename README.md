@@ -79,10 +79,11 @@ npm run tauri dev
 **Ubuntu/Debian:**
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential cmake libpipewire-0.3-dev libopus-dev \
-    libavformat-dev libavcodec-dev libavutil-dev libswscale-dev \
-    libswresample-dev libwebkit2gtk-4.0-dev libappindicator3-dev \
-    librsvg2-dev patchelf libgtk-3-dev libxdo-dev libxrandr-dev libxcb-randr0-dev
+sudo apt-get install -y build-essential curl wget file libssl-dev \
+    libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+    libxdo-dev libxcb-randr0-dev xdg-desktop-portal libpipewire-0.3-dev libopus-dev \
+    libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
+    patchelf libxrandr-dev
 ```
 
 **Desktop Portal Requirements (Linux):**
@@ -100,14 +101,15 @@ sudo apt-get install -y xdg-desktop-portal-kde
 systemctl --user restart xdg-desktop-portal xdg-desktop-portal-gtk
 ```
 
-**For Ubuntu 22.04:**
+**For Ubuntu 24.04 (Latest):**
 ```bash
-# Standard Ubuntu 22.04 packages (no additional repositories needed)
+# Standard Ubuntu 24.04 packages (no additional repositories needed)
 sudo apt update
-sudo apt install -y build-essential curl wget file libssl-dev 
-    libwebkit2gtk-4.0-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev 
-    libxdo-dev libxcb-randr0-dev xdg-desktop-portal libpipewire-0.3-dev libopus-dev 
-    libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
+sudo apt install -y build-essential curl wget file libssl-dev \
+    libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+    libxdo-dev libxcb-randr0-dev xdg-desktop-portal libpipewire-0.3-dev libopus-dev \
+    libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
+    patchelf libxrandr-dev
 ```
 
 ## Usage
