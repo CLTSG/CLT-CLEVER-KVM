@@ -55,7 +55,7 @@ Before building, you need to install system dependencies including FFmpeg:
 #### Linux (Ubuntu/Debian)
 ```bash
 sudo apt-get update
-sudo apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev \
+sudo apt-get install -y libwebkit2gtk-4.1-dev \
     libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev \
     ffmpeg libavcodec-dev libavformat-dev libavutil-dev \
     libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev \
@@ -236,7 +236,7 @@ Before building on Linux, install the required dependencies:
 ```bash
 # Ubuntu/Debian
 sudo apt-get update
-sudo apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev \
+sudo apt-get install -y libwebkit2gtk-4.1-dev \
   libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev \
   libxdo-dev libxrandr-dev
 

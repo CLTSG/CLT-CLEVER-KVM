@@ -79,7 +79,7 @@ npm run tauri dev
 **Ubuntu/Debian:**
 ```bash
 sudo apt-get update
-sudo apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev \
+sudo apt-get install -y libwebkit2gtk-4.1-dev \
     libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev \
     libxdo-dev libxrandr-dev libxcb-randr0-dev build-essential \
     libavformat-dev libavcodec-dev libavutil-dev libswscale-dev \
@@ -106,7 +106,7 @@ systemctl --user restart xdg-desktop-portal xdg-desktop-portal-gtk
 # Add jammy universe repository
 echo "deb http://archive.ubuntu.com/ubuntu jammy main universe" | sudo tee -a /etc/apt/sources.list
 sudo apt update
-sudo apt install libwebkit2gtk-4.0-dev build-essential curl wget file libssl-dev \
+sudo apt install build-essential curl wget file libssl-dev \
     libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
     libjavascriptcoregtk-4.0-bin libjavascriptcoregtk-4.0-dev \
     libsoup2.4-dev libxdo-dev libxcb-randr0-dev xdg-desktop-portal
