@@ -55,11 +55,10 @@ Before building, you need to install system dependencies including FFmpeg:
 #### Linux (Ubuntu/Debian)
 ```bash
 sudo apt-get update
-sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev  \
-    libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev \
-    ffmpeg libavcodec-dev libavformat-dev libavutil-dev \
-    libavdevice-dev libavfilter-dev libswscale-dev libswresample-dev \
-    pkg-config libxcb-randr0-dev
+sudo apt-get install -y build-essential cmake libpipewire-0.3-dev libopus-dev \
+    libavformat-dev libavcodec-dev libavutil-dev libswscale-dev \
+    libswresample-dev libwebkit2gtk-4.0-dev libappindicator3-dev \
+    librsvg2-dev patchelf libgtk-3-dev libxdo-dev libxrandr-dev libxcb-randr0-dev
 ```
 
 #### macOS
@@ -236,13 +235,14 @@ Before building on Linux, install the required dependencies:
 ```bash
 # Ubuntu/Debian
 sudo apt-get update
-sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev  \
-  libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev \
-  libxdo-dev libxrandr-dev
+sudo apt-get install -y build-essential cmake libpipewire-0.3-dev libopus-dev \
+    libavformat-dev libavcodec-dev libavutil-dev libswscale-dev \
+    libswresample-dev libwebkit2gtk-4.0-dev libappindicator3-dev \
+    librsvg2-dev patchelf libgtk-3-dev libxdo-dev libxrandr-dev libxcb-randr0-dev
 
 # Fedora/RHEL
 sudo dnf install webkit2gtk4.0-devel libappindicator-gtk3-devel \
-  librsvg2-devel gtk3-devel libxdo-devel libXrandr-devel
+  librsvg2-devel gtk3-devel libxdo-devel libXrandr-devel pipewire-devel opus-devel
 ```
 
 ### Windows Code Signing
